@@ -1,0 +1,22 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtualenv
+.venv/
+venv/
+
+# Logs
+audit.log
+*.log
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Pastas antigas / backup
+ANTES/
