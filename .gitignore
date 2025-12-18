@@ -20,3 +20,6 @@ audit.log
 
 # Pastas antigas / backup
 ANTES/
+
+# Env
+.env

@@ -1,3 +1,5 @@
+![PULSE-TRADER Dashboard](docs/img/dashboard.png)
+
 # PULSE-TRADER
 
 Dashboard profissional (estilo “cockpit”) para **decisão de trade** em tempo real, com:
@@ -42,6 +44,8 @@ pip install -r requirements.txt
 ---
 
 ## 3) Chaves de API (recomendado)
+
+Você pode copiar o arquivo `.env.example` para `.env` e preencher as chaves (o `.env` fica ignorado pelo Git).
 
 Para notícias melhores e mais rápidas, configure:
 
