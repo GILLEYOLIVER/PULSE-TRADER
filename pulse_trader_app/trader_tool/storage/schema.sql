@@ -1,0 +1,47 @@
+CREATE SCHEMA IF NOT EXISTS pulse;
+
+CREATE TABLE IF NOT EXISTS pulse.signals (
+  id BIGSERIAL PRIMARY KEY,
+  ts TIMESTAMPTZ NOT NULL,
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL,
+  confidence DOUBLE PRECISION NOT NULL,
+  rationale TEXT NOT NULL,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS pulse.trades_approved (
+  id BIGSERIAL PRIMARY KEY,
+  ts TIMESTAMPTZ NOT NULL,
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL,
+  contracts INT NOT NULL,
+  entry_hint DOUBLE PRECISION NOT NULL,
+  stop_price DOUBLE PRECISION NOT NULL,
+  target_price DOUBLE PRECISION,
+  risk_amount DOUBLE PRECISION NOT NULL,
+  rationale TEXT NOT NULL,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS pulse.fills (
+  id BIGSERIAL PRIMARY KEY,
+  ts TIMESTAMPTZ NOT NULL,
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL,
+  contracts INT NOT NULL,
+  price DOUBLE PRECISION NOT NULL,
+  fees DOUBLE PRECISION NOT NULL,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS pulse.pnl_events (
+  id BIGSERIAL PRIMARY KEY,
+  ts TIMESTAMPTZ NOT NULL,
+  symbol TEXT NOT NULL,
+  realized_pnl DOUBLE PRECISION NOT NULL,
+  was_stop BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pulse_signals_ts ON pulse.signals(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_pulse_fills_ts ON pulse.fills(ts DESC);
