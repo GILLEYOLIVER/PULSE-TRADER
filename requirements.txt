@@ -1,5 +1,0 @@
-customtkinter>=5.2.0
-matplotlib>=3.8.0
-requests>=2.31.0
-gdeltdoc>=1.3.0
-python-dateutil>=2.9.0
