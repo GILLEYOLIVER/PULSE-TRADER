@@ -1,0 +1,18 @@
+# Core
+numpy>=1.26
+matplotlib>=3.8
+
+# UI
+customtkinter>=5.2
+
+# Networking/news parsing
+requests>=2.31
+python-dateutil>=2.9
+
+# Nice console logs (optional but used in some prints)
+rich>=13
+
+# Optional (se quiser habilitar GDELT via gdeltdoc)
+# gdeltdoc
+# pandas
+
