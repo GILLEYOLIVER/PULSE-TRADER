@@ -10,3 +10,4 @@ from trading_assistant.diagnostics import run_diagnostics, print_diagnostics
 
 if __name__ == '__main__':
     raise SystemExit(print_diagnostics(run_diagnostics()))
+#fim aqui

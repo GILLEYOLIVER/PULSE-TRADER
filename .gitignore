@@ -1,0 +1,12 @@
+
+# Python cache
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# Logs
+*.log
+audit.log
+crash.log
