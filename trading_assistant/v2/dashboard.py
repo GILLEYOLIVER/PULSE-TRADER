@@ -20,6 +20,7 @@ from .backtest import metrics,run_backtest,save_report
 from .chart_raster import antialiased_lines_png
 from .session import local_time
 from .session import SessionCalendar
+from .suggestions_ui import SuggestionsPanel
 
 class Dashboard:
     def __init__(self,data_dir=None):
@@ -37,7 +38,11 @@ class Dashboard:
         except ImportError:
             self.root=tk.Tk()
         self.root.title("PULSE-TRADER 2.0 | PAPER")
-        self.root.geometry("1380x850");self.root.minsize(1050,690)
+        scale=self.root._get_window_scaling() if hasattr(self.root,"_get_window_scaling") else 1.
+        available_width=max(640,int((self.root.winfo_screenwidth()-40)/scale))
+        available_height=max(480,int((self.root.winfo_screenheight()-100)/scale))
+        self.root.geometry(f"{min(1380,available_width)}x{min(850,available_height)}+12+12")
+        self.root.minsize(min(1050,available_width),min(690,available_height))
         self.root.protocol("WM_DELETE_WINDOW",self.close)
         self.data_dir=Path(data_dir or os.getenv("PULSE_DATA_DIR","runtime"));self.data_dir.mkdir(parents=True,exist_ok=True)
         self.ledger=Ledger(self.data_dir/"paper.sqlite")
@@ -120,6 +125,8 @@ class Dashboard:
         self._button(manual,"Venda PAPER por risco",lambda:self.manual("SELL"))
         self._button(manual,"Zerar posições PAPER",self.flatten)
         self._button(manual,"Cancelar ordens pendentes",self.cancel_pending)
+
+        self.suggestions=SuggestionsPanel(self.tabs,self)
 
         self.results=ttk.Frame(self.tabs,padding=12);self.tabs.add(self.results,text="Ordens e resultados")
         columns=("kind","id","symbol","side","qty","price","state","net")
@@ -214,6 +221,7 @@ class Dashboard:
         st.map("Treeview",background=[("selected",accent)],foreground=[("selected","white")])
         self.chart.configure(bg=panel)
         self.settings_text.configure(bg=panel,fg=fg,insertbackground=fg,highlightbackground=border,highlightcolor=accent)
+        self.suggestions.apply_theme(self.dark)
         self.draw()
 
     def toggle_theme(self):self.dark=not self.dark;self._theme()
@@ -313,6 +321,8 @@ class Dashboard:
         calendar=SessionCalendar.from_config(data["calendar"]) if data.get("calendar") is not None else None
         engine=PaperEngine(self.ledger,limits,costs,strategy=strategy,calendar=calendar);engine.history=self.engine.history
         self.engine=engine;self.limits=limits;self.costs=costs
+        self.suggestions.signature=None
+        self.suggestions.analyze()
         for key,value in (("capital",limits.capital),("risk_percent",limits.risk_fraction*100),
                           ("daily_loss",limits.daily_loss),("max_contracts",limits.max_contracts),
                           ("max_trades",limits.max_trades),("strategy",strategy.name)):
@@ -375,6 +385,7 @@ class Dashboard:
         for o in list(s["orders"].values())[-100:]:self.table.insert("","end",values=("Ordem",o["id"][:10],o["symbol"],o["side"],o["filled_qty"] or o["qty"],round(o.get("filled_price",o["price"]),2),o["status"]+" / "+o["message"],""))
         for p in s["positions"].values():self.table.insert("","end",values=("Posição",p["id"][:10],p["symbol"],p["side"],p["qty"],round(p["entry"],2),"ABERTA",""))
         for t in s["trades"][-100:]:self.table.insert("","end",values=("Resultado",t["id"][:10],t["symbol"],t["side"],t["qty"],round(t["exit"],2),t["exit_reason"],round(t["net"],2)))
+        self.suggestions.replay_changed()
         self.draw()
     def zoom(self,factor):self.window=max(15,min(300,int(self.window*factor)));self.draw()
     def change_period(self):self.offset=0;self.draw()

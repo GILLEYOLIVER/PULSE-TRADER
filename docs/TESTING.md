@@ -9,7 +9,7 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-51 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
+61 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
 profit stop, stale data, duplicate orders, manual oversizing, conservative barriers and gaps, sell trades,
 partial IOC fill, zero liquidity, cancel, disconnect/reconnect, emergency, rollback after injected failures,
 positions/blocks across restart, revised candles, invalid values, CSV roundtrip, aggregation, reproducibility,
@@ -18,6 +18,9 @@ while retaining protective stops on existing positions. Additional cases reject 
 mixed CSV origin/timeframe, incompatible ML series and conflicting requested quantities under one idempotency key.
 User-supplied session rules block entries on holidays while leaving protective exits active.
 Saved risk, execution, strategy and calendar assumptions are immutable in memory.
+Suggestions coverage includes both profiles and directions, exclusion of open/future candles,
+flat/short-history abstention, metadata/overlap/revision rejection, unsupported instruments,
+durable idempotent proposals without orders, and data provenance/tick rounding.
 
 The first run found four sandbox temporary-directory access errors. Tests were changed to create their
 isolated temporary directories under the project; none were skipped. Subsequent suite runs passed.
@@ -27,6 +30,9 @@ The same GUI smoke passed after local installation of CustomTkinter 6.0.0 and Pi
 the standard Tk fallback had already passed. This checks window creation and core controls, not every visual state.
 `scripts/install.ps1 -Ui` completed successfully and the diagnostic reported `customtkinter: true` and `live: DISABLED`.
 The GUI smoke also applied the user-supplied calendar through the advanced settings JSON.
+It also checks both Suggestions profiles, multi-file import and catalog reload, proposal storage
+without orders, replay-only history and JSON export. Set `PULSE_SMOKE_SCREENSHOT` to an output PNG path
+to capture the temporary application window; all data remain isolated from the normal ledger.
 
 End-to-end CLI runs: 1,000-bar deterministic demo, CSV replay, 500-bar walk-forward, 300-bar model training
 and fixed-grid sensitivity. Reports contain source/hash/parameters. This checks mechanics, not profitability.

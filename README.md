@@ -63,6 +63,11 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
    **Ordens e resultados > Treinar modelo com CSV**. O arquivo JSON resultante
    mostra acerto em validação e teste, comparado com referências simples; ele
    não envia ordens, não garante rentabilidade e não é ativado automaticamente.
+9. Em **Sugestões**, escolha **No dia** ou **Dias e semanas**. Use **Adicionar CSVs** para
+   comparar vários ativos, **Usar replay atual** para analisar somente candles já processados ou
+   **Exemplo simulado** para conhecer a tela. Setas e cores mostram alta, baixa ou lateralização;
+   selecione o ativo para ler o motivo, a condição de entrada, stop e alvo.
+   **Guardar plano PAPER** salva uma proposta sem criar uma ordem. [Guia das sugestões](docs/SUGGESTIONS.md).
 
 O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
 períodos de **1, 5 e 15 minutos** quando os dados de origem permitem, e temas claro/escuro.

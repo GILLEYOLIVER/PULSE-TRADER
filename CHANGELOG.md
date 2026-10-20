@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add a multi-asset Suggestions tab with intraday/daily profiles, visual trend, reasons and conditional entry/stop/target proposals.
+- Persist authorized analysis candles and idempotent PAPER proposals without creating orders; exclude unfinished/future candles.
+- Fit the initial desktop window to the screen at Windows display scaling.
 - Reject reuse of a paper order idempotency key when its stop, target, expiry, or strategy changes.
 - Reject conflicting requested quantities for an existing paper order key.
 - Enforce whole-number execution limits and consistent CSV/ML data source and timeframe.

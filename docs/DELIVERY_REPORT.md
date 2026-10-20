@@ -14,6 +14,11 @@ benchmark simples, particionamento temporal, walk-forward e sensibilidade. ML op
 normalização somente no treino, purge temporal, baselines, checksum e aviso de drift;
 não calibra confiança nem pode ignorar o risco ou ativar execução.
 
+Aba Sugestões com vários ativos, perfis intradiário/diário, indicação visual de alta/baixa/lateralização,
+motivo, entrada condicional, stop e alvo. Catálogo CSV persistente, corte por candle encerrado,
+exportação e propostas idempotentes em SQLite. Os planos não criam ordens e não têm risco aprovado.
+Análise técnica por regras; não apresenta scores como probabilidades nem incorpora balanços/notícias.
+
 Dashboard desktop com Tk/CustomTkinter opcional, candles, volume, EMA9/21, zoom, navegação,
 timeframes, temas, sinais, resultados, controles simples de risco/estratégia e JSON avançado.
 Entradas pendentes são canceladas ao detectar candles ausentes; stops abertos continuam ativos no replay.
@@ -32,10 +37,12 @@ A UI anterior e módulos de notícias/análise foram preservados, sem execução
 
 ## Verificação efetiva
 
-- 51 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
+- 61 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
 - Compilação de todos os módulos aprovada.
 - Smoke da interface Windows: formulário de risco, 80 candles, renderização, zoom, pan, tema, timeframe e emergência aprovados.
 - Smoke repetido no ambiente virtual com CustomTkinter 6.0.0 e Pillow 13.0.0, aprovado.
+- Smoke da aba Sugestões: perfis intradiário/diário, importação de vários CSVs, catálogo persistente,
+  plano sem ordens, corte temporal do replay, exportação e tema aprovados.
 - `scripts/install.ps1 -Ui` concluiu a instalação mínima da interface e o diagnóstico confirmou LIVE desabilitado.
 - Diagnóstico Python 3.12.10 / SQLite 3.49.1 / Tk aprovado.
 - Venv criado e diagnóstico do instalador aprovado.
