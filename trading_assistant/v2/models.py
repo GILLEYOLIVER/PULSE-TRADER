@@ -13,7 +13,10 @@ def aware(ts: datetime) -> datetime:
     return ts.astimezone(UTC)
 
 def finite(*values: float) -> bool:
-    return all(math.isfinite(v) for v in values)
+    try:
+        return all(type(v) in (int,float) and math.isfinite(v) for v in values)
+    except OverflowError:
+        return False
 
 @dataclass(frozen=True)
 class Bar:
@@ -31,7 +34,7 @@ class Bar:
         aware(self.ts)
         if (not self.symbol or not self.source or not finite(self.open,self.high,self.low,self.close,self.volume)
             or self.low <= 0 or self.volume < 0 or self.low > min(self.open,self.close)
-            or self.high < max(self.open,self.close) or self.seconds <= 0):
+            or self.high < max(self.open,self.close) or type(self.seconds) is not int or self.seconds <= 0):
             raise ValueError("Invalid OHLCV candle")
 
 @dataclass(frozen=True)
@@ -45,7 +48,8 @@ class Instrument:
     expiry: str | None = None
 
     def __post_init__(self):
-        if not finite(self.point_value,self.tick,self.margin) or min(self.point_value,self.tick,self.margin) <= 0 or self.lot < 1:
+        if (not finite(self.point_value,self.tick,self.margin) or min(self.point_value,self.tick,self.margin) <= 0
+            or type(self.lot) is not int or self.lot < 1):
             raise ValueError("Invalid instrument specification")
 
 # Financial multipliers; margins are deliberately configurable paper assumptions.
@@ -73,7 +77,7 @@ class Decision:
     def rr(self) -> float:
         return abs(self.target-self.price)/abs(self.price-self.stop) if self.stop != self.price else 0.
 
-@dataclass
+@dataclass(frozen=True)
 class Limits:
     capital: float = 10000.
     risk_fraction: float = .005
@@ -95,7 +99,19 @@ class Limits:
     allowed_strategies: tuple[str,...] = ("trend","breakout","pullback")
     max_data_age_seconds: int = 180
 
+    def __post_init__(self):
+        if isinstance(self.allowed_symbols,list): object.__setattr__(self,"allowed_symbols",tuple(self.allowed_symbols))
+        if isinstance(self.allowed_strategies,list): object.__setattr__(self,"allowed_strategies",tuple(self.allowed_strategies))
+
     def validate(self):
+        if (not isinstance(self.allowed_symbols,tuple) or not self.allowed_symbols
+            or not isinstance(self.allowed_strategies,tuple) or not self.allowed_strategies
+            or any(not isinstance(value,str) or not value for value in self.allowed_symbols+self.allowed_strategies)):
+            raise ValueError("Authorized assets and strategies must be nonempty lists of names")
+        counts = (self.max_positions,self.max_contracts,self.max_trades,self.consecutive_losses,
+                  self.max_data_age_seconds,self.cooldown_seconds,self.start_hour,self.end_hour)
+        if any(type(value) is not int for value in counts):
+            raise ValueError("Counts and hours must be whole numbers")
         positive = (self.capital,self.daily_loss,self.weekly_loss,self.monthly_loss,self.daily_target,self.max_exposure)
         if not finite(*positive,self.risk_fraction,self.max_spread_ticks,self.max_slippage_ticks) or min(positive) <= 0:
             raise ValueError("Limits must be finite and positive")
@@ -106,7 +122,7 @@ class Limits:
         if min(self.max_spread_ticks,self.max_slippage_ticks,self.cooldown_seconds) < 0 or not 0 <= self.start_hour < self.end_hour <= 24:
             raise ValueError("Invalid time or execution limits")
 
-@dataclass
+@dataclass(frozen=True)
 class ExecutionSettings:
     spread_ticks: float = 1.
     slippage_ticks: float = 1.
@@ -119,5 +135,5 @@ class ExecutionSettings:
     def validate(self):
         if (not finite(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.participation,self.trailing_atr,self.break_even_r)
             or min(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.trailing_atr,self.break_even_r) < 0
-            or not 0 < self.participation <= 1 or self.latency_bars < 1):
+            or not 0 < self.participation <= 1 or type(self.latency_bars) is not int or self.latency_bars < 1):
             raise ValueError("Invalid paper execution settings")

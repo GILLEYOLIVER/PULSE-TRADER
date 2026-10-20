@@ -5,7 +5,7 @@ import math
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import datetime,timedelta
+from datetime import date,datetime,time,timedelta
 from pathlib import Path
 from trading_assistant.v2.models import *
 from trading_assistant.v2.data import *
@@ -16,6 +16,7 @@ from trading_assistant.v2.execution import PaperEngine
 from trading_assistant.v2.backtest import run_backtest,temporal_split,walk_forward
 from trading_assistant.v2.integrations import RicoProfitAdapter
 from trading_assistant.v2.ml import train_temporal,predict
+from trading_assistant.v2.session import SessionCalendar
 
 START=datetime(2026,1,5,12,tzinfo=UTC)
 
@@ -102,9 +103,33 @@ class PaperCase(unittest.TestCase):
         self.engine.on_bar(bar(START+timedelta(minutes=1),symbol="WIN"),False)
         self.assertEqual(self.engine.submit(signal(symbol="WIN",ts=START+timedelta(minutes=2),stop=980))["status"],"REJECTED")
     def test_invalid_numbers(self):
-        for price in (float('nan'),float('inf'),-1):
+        for price in (float('nan'),float('inf'),-1,True):
             with self.assertRaises(ValueError): bar(price=price)
+        with self.assertRaises(ValueError):replace(bar(),open="1000")
         with self.assertRaises(ValueError): Limits(risk_fraction=float('nan')).validate()
+        with self.assertRaises(ValueError): Limits(capital=True).validate()
+        with self.assertRaises(ValueError): Limits(capital=10**400).validate()
+        with self.assertRaises(ValueError): ExecutionSettings(fee_per_unit=True).validate()
+    def test_fractional_or_boolean_execution_counts_rejected(self):
+        for settings in (Limits(max_contracts=1.5),Limits(max_trades=True),Limits(start_hour=9.5)):
+            with self.subTest(settings=settings),self.assertRaises(ValueError):
+                settings.validate()
+        ledger=Ledger()
+        try:
+            with self.assertRaises(ValueError):PaperEngine(ledger,Limits(max_contracts=1.5))
+        finally:ledger.close()
+        for settings in (ExecutionSettings(latency_bars=1.5),ExecutionSettings(latency_bars=True)):
+            with self.subTest(settings=settings),self.assertRaises(ValueError): settings.validate()
+        with self.assertRaises(ValueError): replace(bar(),seconds=60.5)
+        with self.assertRaises(ValueError): replace(INSTRUMENTS["WIN"],lot=1.5)
+        with self.assertRaises(ValueError): Strategy(reward_r=float("nan"))
+        with self.assertRaises(ValueError): Limits(allowed_symbols="WIN").validate()
+    def test_saved_risk_assumptions_are_immutable(self):
+        with self.assertRaises(AttributeError):self.engine.limits.max_contracts=100
+        with self.assertRaises(AttributeError):self.engine.costs.fee_per_unit=0
+        with self.assertRaises(AttributeError):self.engine.strategy.name="breakout"
+        calendar=SessionCalendar({date(2026,1,5)},verified=True)
+        with self.assertRaises(AttributeError):calendar.holidays.add(date(2026,1,6))
     def test_duplicate_candle_ignored(self):
         self.engine.on_bar(bar(),False);self.assertEqual(self.ledger.read()["sequence"],1)
         with self.assertRaises(ValueError):self.engine.on_bar(bar(close=1000.5),False)
@@ -129,6 +154,24 @@ class PaperCase(unittest.TestCase):
         with self.assertRaises(ValueError):PaperEngine(self.ledger,Limits(capital=20000))
     def test_unauthorized(self):
         self.assertIn("authorized",self.engine.submit(replace(signal(),strategy="unknown"))["message"])
+    def test_user_verified_session_blocks_entries_but_keeps_exits(self):
+        holiday=SessionCalendar({date(2026,1,5)},verified=True)
+        ledger=Ledger();engine=PaperEngine(ledger,calendar=holiday)
+        engine.on_bar(bar(),False)
+        self.assertIn("session",engine.submit(signal())["message"])
+        ledger.close()
+
+        calendar=SessionCalendar(verified=True)
+        self.assertEqual(SessionCalendar.from_config(calendar.to_config()),calendar)
+        ledger=Ledger();engine=PaperEngine(ledger,calendar=calendar,
+            costs=ExecutionSettings(spread_ticks=0,slippage_ticks=0,fee_per_unit=0))
+        engine.on_bar(bar(),False);engine.submit(signal(),"session-order")
+        engine.on_bar(bar(START+timedelta(minutes=1)),False)
+        self.assertEqual(len(ledger.read()["positions"]),1)
+        with self.assertRaises(ValueError):PaperEngine(ledger,calendar=SessionCalendar())
+        engine.on_bar(bar(datetime(2026,1,5,21,tzinfo=UTC),price=990),False)
+        self.assertEqual(ledger.read()["trades"][0]["exit_reason"],"STOP")
+        ledger.close()
     def test_no_future_open_fill(self):
         self.engine.submit(signal(),"x")
         self.engine.on_bar(bar(START+timedelta(minutes=1),price=1003,low=1002,high=1004,close=1004),False)
@@ -163,6 +206,14 @@ class AnalysisCase(unittest.TestCase):
                 export_csv(rows,path)
                 with self.assertRaises(ValueError):CSVProvider(path).bars()
             with self.assertRaises(ValueError):replace(bars[0],ts=bars[0].ts.replace(tzinfo=None))
+    def test_csv_reject_mixed_source_or_timeframe(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+            path=Path(tmp)/"history.csv";bars=SyntheticProvider(count=2).bars()
+            for changed in ({"source":"OTHER_EXPORT"},{"seconds":300}):
+                with self.subTest(changed=changed):
+                    export_csv([bars[0],replace(bars[1],**changed)],path)
+                    with self.assertRaisesRegex(ValueError,"Mixed source or timeframe"):
+                        CSVProvider(path).bars()
     def test_backtest_reproducible(self):
         bars=SyntheticProvider(count=250).bars()
         a=run_backtest(bars);b=run_backtest(bars)
@@ -175,10 +226,14 @@ class AnalysisCase(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
             bars=SyntheticProvider(count=300).bars();m=train_temporal(bars,Path(tmp)/"model.json")
             self.assertFalse(m["execution_enabled"]);self.assertIsNone(predict(m,bars)["confidence"])
+            mixed=bars.copy();mixed[-1]=replace(mixed[-1],source="OTHER_EXPORT")
+            with self.assertRaises(ValueError):predict(m,mixed)
+            with self.assertRaises(ValueError):train_temporal(mixed,Path(tmp)/"invalid.json")
             m["weights"][0]+=1
             with self.assertRaises(ValueError):predict(m,bars)
     def test_calendar_requires_verified_holidays(self):
-        from trading_assistant.v2.session import SessionCalendar
         self.assertFalse(SessionCalendar().is_open(START,"WIN"))
+        self.assertTrue(SessionCalendar().is_open(START,"BTC"))
+        with self.assertRaises(ValueError):SessionCalendar(start=time(18),end=time(9),verified=True)
 
 if __name__=="__main__":unittest.main()

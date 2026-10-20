@@ -88,6 +88,7 @@ class ExtraCase(unittest.TestCase):
         ):
             with self.subTest(changed=changed),self.assertRaises(ValueError):
                 e.submit(replace(signal(),**changed),'x')
+        with self.assertRaises(ValueError):e.submit(signal(),'x',requested=1)
         ledger.close()
     def test_real_equity_costs(self):
         report=run_backtest(SyntheticProvider(count=150).bars())

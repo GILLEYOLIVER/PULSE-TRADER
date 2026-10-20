@@ -10,15 +10,17 @@ from .strategy import Strategy
 class PaperEngine:
     """Only execution implementation shipped. No flag can enable real routing."""
     mode="PAPER"
-    def __init__(self,ledger:Ledger,limits=None,costs=None,instruments=None,strategy=None):
+    def __init__(self,ledger:Ledger,limits=None,costs=None,instruments=None,strategy=None,calendar=None):
         self.ledger=ledger
         self.limits=limits or Limits();self.costs=costs or ExecutionSettings()
         self.specs=dict(instruments or INSTRUMENTS)
-        self.risk=RiskManager(self.limits,self.costs)
+        self.risk=RiskManager(self.limits,self.costs,calendar)
+        self.calendar=calendar
         self.strategy=strategy or Strategy()
         self.history={};self.last_decision=None
         # Persist immutable assumptions and reject accidental reinterpretation of open positions.
         config={"strategy":{"name":self.strategy.name,"reward_r":self.strategy.reward_r,"stop_atr":self.strategy.stop_atr,"multi_timeframe":self.strategy.multi_timeframe},"limits":asdict(self.limits),"costs":asdict(self.costs),"instruments":{k:asdict(v) for k,v in self.specs.items()}}
+        if calendar is not None: config["calendar"]=calendar.to_config()
         import json
         config=json.loads(json.dumps(config))
         with ledger.transaction() as s:
@@ -36,8 +38,8 @@ class PaperEngine:
             if key in s["orders"]:
                 old=s["orders"][key]
                 if (old["symbol"],old["side"],old["price"],old["stop"],old["target"],
-                    old["signal_ts"],old["expires"],old["strategy"]) != (
-                    d.symbol,d.side,d.price,d.stop,d.target,d.ts.isoformat(),d.expires.isoformat(),d.strategy):
+                    old["signal_ts"],old["expires"],old["strategy"],old.get("requested_qty")) != (
+                    d.symbol,d.side,d.price,d.stop,d.target,d.ts.isoformat(),d.expires.isoformat(),d.strategy,requested):
                     raise ValueError("Idempotency key reused for different order")
                 return dict(old)
             spec=self.specs.get(d.symbol)
@@ -45,7 +47,7 @@ class PaperEngine:
             order={"id":key,"symbol":d.symbol,"side":d.side,"price":d.price,"stop":d.stop,"target":d.target,
                 "signal_ts":d.ts.isoformat(),"expires":d.expires.isoformat(),"created_at":d.ts.isoformat(),
                 "regime":"volatile" if d.indicators.get("volatility_ratio",0)>2 else "trend" if d.indicators.get("trend_strength",0)>.5 else "range","strategy":d.strategy,"reason":d.reason,"source":s["last_sources"].get(d.symbol),"qty":qty,"filled_qty":0,"status":"NEW" if qty else "REJECTED",
-                "message":reason,"bars_waited":0,"point_value":spec.point_value if spec else 0.,
+                "message":reason,"requested_qty":requested,"bars_waited":0,"point_value":spec.point_value if spec else 0.,
                 "margin":spec.margin if spec else 0.,"reserved_risk":0.}
             if qty:
                 per_unit=abs(d.price-d.stop)*spec.point_value+2*self.costs.fee_per_unit+2*(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick*spec.point_value

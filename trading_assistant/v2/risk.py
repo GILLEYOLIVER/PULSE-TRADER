@@ -5,9 +5,9 @@ from .models import Decision,Instrument,Limits,ExecutionSettings,aware,finite
 from .session import local_time
 
 class RiskManager:
-    def __init__(self,limits: Limits,costs: ExecutionSettings):
+    def __init__(self,limits: Limits,costs: ExecutionSettings,calendar=None):
         limits.validate();costs.validate()
-        self.limits,self.costs=limits,costs
+        self.limits,self.costs,self.calendar=limits,costs,calendar
 
     def period_pnl(self,s,now):
         day=local_time(now).date(); week=day.isocalendar()[:2]
@@ -57,6 +57,8 @@ class RiskManager:
         reason=self.block_reason(s,now)
         if reason: return 0,reason
         if d.symbol!=spec.symbol or d.symbol not in l.allowed_symbols or d.strategy not in l.allowed_strategies: return 0,"Asset or strategy not authorized"
+        if self.calendar is not None and not self.calendar.is_open(now,d.symbol):
+            return 0,"Outside user-verified session or calendar unavailable"
         if d.side not in ("BUY","SELL") or not finite(d.price,d.stop,d.target) or min(d.price,d.stop,d.target)<=0: return 0,"Invalid decision"
         if not aware(d.ts)<=now<=aware(d.expires): return 0,"Expired or future signal"
         last=s["last_bars"].get(d.symbol)

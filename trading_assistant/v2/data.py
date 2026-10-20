@@ -33,9 +33,13 @@ class CSVProvider:
                 out.append(b)
         if not out: raise ValueError("Empty CSV")
         # Preserve input order; never silently repair lookahead or timestamp errors.
-        previous={}
+        previous={};metadata={}
         for b in out:
             if b.symbol in previous and b.ts < previous[b.symbol]: raise ValueError("Unsorted or overlapping candles")
+            series=(b.source,b.seconds)
+            if b.symbol in metadata and metadata[b.symbol]!=series:
+                raise ValueError("Mixed source or timeframe for symbol")
+            metadata[b.symbol]=series
             previous[b.symbol] = b.ts+timedelta(seconds=b.seconds)
         return sorted(out,key=lambda b:(b.ts,b.symbol))
 

@@ -19,6 +19,7 @@ from .strategy import Strategy
 from .backtest import metrics,run_backtest,save_report
 from .chart_raster import antialiased_lines_png
 from .session import local_time
+from .session import SessionCalendar
 
 class Dashboard:
     def __init__(self,data_dir=None):
@@ -42,7 +43,8 @@ class Dashboard:
         self.ledger=Ledger(self.data_dir/"paper.sqlite")
         config=self.ledger.read().get("config",{})
         self.limits=Limits(**config.get("limits",{}));self.costs=ExecutionSettings(**config.get("costs",{}))
-        self.engine=PaperEngine(self.ledger,self.limits,self.costs,strategy=Strategy(**config.get("strategy",{})))
+        calendar=SessionCalendar.from_config(config["calendar"]) if config.get("calendar") is not None else None
+        self.engine=PaperEngine(self.ledger,self.limits,self.costs,strategy=Strategy(**config.get("strategy",{})),calendar=calendar)
         self.bars=[];self.feed=[];self.cursor=0;self.running=False;self.timer=None
         self.window=70;self.offset=0;self.dark=True;self._chart_image=None
         self.symbol=tk.StringVar(value="WIN");self.strategy=tk.StringVar(value="trend")
@@ -155,10 +157,10 @@ class Dashboard:
             widget.grid(row=1,column=col,sticky="ew",padx=4,pady=(5,8))
         ttk.Button(quick,text="Aplicar controles principais",style="Accent.TButton",
                    command=lambda:self.guard(self.apply_quick_settings)).grid(row=2,column=0,columnspan=3,sticky="w",padx=4)
-        ttk.Label(settings,text="Configuração avançada: ativos, horários, custos, stops e demais limites em JSON.",style="Section.TLabel").pack(anchor="w",padx=8)
+        ttk.Label(settings,text="Configuração avançada: ativos, horários, custos, stops e calendário conferido pelo usuário em JSON.",style="Section.TLabel").pack(anchor="w",padx=8)
         self.settings_text=tk.Text(settings,height=15,font=("Consolas",11),wrap="none",padx=12,pady=10,relief="flat",highlightthickness=1)
         self.settings_text.pack(fill="both",expand=True,padx=8)
-        self.settings_text.insert("1.0",json.dumps({"limits":asdict(self.limits),"execution":asdict(self.costs),"strategy":{"name":self.engine.strategy.name,"reward_r":self.engine.strategy.reward_r,"stop_atr":self.engine.strategy.stop_atr,"multi_timeframe":self.engine.strategy.multi_timeframe}},indent=2))
+        self.settings_text.insert("1.0",json.dumps({"limits":asdict(self.limits),"execution":asdict(self.costs),"strategy":{"name":self.engine.strategy.name,"reward_r":self.engine.strategy.reward_r,"stop_atr":self.engine.strategy.stop_atr,"multi_timeframe":self.engine.strategy.multi_timeframe},"calendar":self.engine.calendar.to_config() if self.engine.calendar else None},indent=2))
         self._button(settings,"Validar e aplicar configuração",self.apply_settings,style="Accent.TButton")
         self._button(settings,"Liberar emergência local",lambda:self.emergency(False))
 
@@ -308,7 +310,8 @@ class Dashboard:
     def apply_settings(self):
         self.pause();data=json.loads(self.settings_text.get("1.0","end"))
         limits=Limits(**data["limits"]);costs=ExecutionSettings(**data["execution"]);strategy=Strategy(**data["strategy"])
-        engine=PaperEngine(self.ledger,limits,costs,strategy=strategy);engine.history=self.engine.history
+        calendar=SessionCalendar.from_config(data["calendar"]) if data.get("calendar") is not None else None
+        engine=PaperEngine(self.ledger,limits,costs,strategy=strategy,calendar=calendar);engine.history=self.engine.history
         self.engine=engine;self.limits=limits;self.costs=costs
         for key,value in (("capital",limits.capital),("risk_percent",limits.risk_fraction*100),
                           ("daily_loss",limits.daily_loss),("max_contracts",limits.max_contracts),
