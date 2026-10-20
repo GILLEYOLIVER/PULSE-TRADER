@@ -7,6 +7,17 @@ Não conecta sua conta Rico e não contém envio real de ordens.
 
 Requer Python 3.11+ com Tcl/Tk. Na pasta do projeto:
 
+### Abrir com F5 no VS Code
+
+Abra **esta pasta `PULSE-TRADER`** no VS Code (Arquivo > Abrir Pasta), instale as extensões
+Python e Python Debugger quando o VS Code oferecer e pressione **F5**. A configuração
+`PULSE-TRADER (PAPER)` abre `main.py` com a pasta correta de trabalho, para manter o
+estado simulado em `runtime/` dentro deste projeto. Se o ambiente `.venv` ainda não
+existir, execute `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1` no terminal
+do VS Code e tente F5 novamente. Use **Shift+F5** para encerrar a janela do depurador.
+
+### Abrir pelo terminal ou atalho
+
 ```powershell
 python main.py
 # ou clique em iniciar.cmd
