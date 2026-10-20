@@ -14,6 +14,12 @@ python main.py
 
 O núcleo, os gráficos Canvas, o replay, o simulador e o backtest usam a biblioteca padrão.
 CustomTkinter é usado como janela quando instalado; Tkinter é o fallback testado.
+Pillow, incluído em `install.ps1 -Full`, desenha candles e médias móveis em resolução
+dobrada com antialiasing. Sem ele, as médias também são suavizadas pelo renderizador
+interno e o Canvas do Tkinter continua disponível.
+No Windows, a janela usa a escala DPI do monitor; maximize a janela para obter
+mais espaço para candles e eixos. Mais pixels melhoram a nitidez, mas não criam
+informações de mercado além das que existem no CSV ou na simulação.
 Para ambiente virtual e bibliotecas opcionais da interface anterior:
 
 ```powershell
@@ -37,6 +43,10 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
 6. A emergência cancela entradas pendentes e bloqueia novas entradas. Stops existentes continuam;
    **Zerar posições PAPER** encerra as posições ao último preço simulado com custos.
 7. Exporte JSON na aba de resultados. Fechar a janela preserva posições, ordens e bloqueios.
+8. Com um CSV histórico autorizado de pelo menos 200 candles de um ativo, abra
+   **Ordens e resultados > Treinar modelo com CSV**. O arquivo JSON resultante
+   mostra acerto em validação e teste, comparado com referências simples; ele
+   não envia ordens, não garante rentabilidade e não é ativado automaticamente.
 
 O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
 três timeframes e temas claro/escuro. Indicadores adicionais aparecem nos sinais e no motor.

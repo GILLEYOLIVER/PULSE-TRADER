@@ -4,6 +4,7 @@ matplotlib>=3.8
 
 # UI
 customtkinter>=5.2
+Pillow>=10.0  # Gráficos com antialiasing em monitores de alta resolução
 
 # Networking/news parsing
 requests>=2.31
