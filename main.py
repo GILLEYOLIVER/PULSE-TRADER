@@ -14,7 +14,7 @@ def _write_crash_log(text: str) -> None:
 
 def main() -> None:
     try:
-        from trading_assistant.ui.dashboard import launch_dashboard
+        from trading_assistant.v2.dashboard import launch_dashboard
         launch_dashboard()
     except Exception as e:
         tb = traceback.format_exc()
