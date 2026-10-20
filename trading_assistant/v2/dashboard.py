@@ -345,7 +345,7 @@ class Dashboard:
         self.pause();path=filedialog.asksaveasfilename(defaultextension=".json",initialfile="pulse-backtest.json")
         if path:
             # Separate ledger; never modifies the current paper positions.
-            report=run_backtest(self.feed,self.engine.strategy,self.limits,self.costs);save_report(report,path)
+            report=run_backtest(self.feed,self.engine.strategy,self.limits,self.costs,calendar=self.engine.calendar);save_report(report,path)
             self.status.set("Backtest concluído / "+str(report["metrics"]["trades"])+" operações / "+path)
     def train_model(self):
         if not self.feed or self.ledger.read().get("feed",{}).get("kind")!="csv":

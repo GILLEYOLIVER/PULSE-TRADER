@@ -1,5 +1,6 @@
 import json
 import tempfile
+from unittest.mock import patch
 from pathlib import Path
 from trading_assistant.v2.dashboard import Dashboard
 with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
@@ -19,8 +20,15 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
     d.apply_settings()
     assert d.engine.calendar.to_config()==settings['calendar']
     for _ in range(80): d.step()
+    d.feed=d.feed[:80]
+    report_path=Path(tmp)/'ui-backtest.json'
+    with patch('trading_assistant.v2.dashboard.filedialog.asksaveasfilename',return_value=str(report_path)):
+        d.backtest()
+    report=json.loads(report_path.read_text(encoding='utf-8'))
+    assert report['calendar']==settings['calendar']
+    assert not any(order['filled_qty'] for order in report['orders'])
     d.zoom(.8);d.pan(10);d.toggle_theme();d.timeframe.set('5 min');d.draw()
     d.emergency(True);assert d.ledger.read()['emergency']
     d.root.update_idletasks();d.root.update()
-    print('GUI_OK: risk form, calendar, 80 bars, chart, zoom, pan, theme, timeframe, emergency')
+    print('GUI_OK: risk form, calendar, UI backtest calendar, 80 bars, chart, zoom, pan, theme, timeframe, emergency')
     d.close()
