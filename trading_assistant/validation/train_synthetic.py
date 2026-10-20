@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import random
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List
 
 from trading_assistant.config import TradingAssistantConfig
@@ -54,7 +54,7 @@ def _gen_synthetic_candles(symbol: str, steps: int, tf_seconds: int) -> List[Can
         l = min(o, c) - random.random() * (vol * 0.6)
 
         price = c
-        ts = ts.replace(second=(ts.second + tf_seconds) % 60)  # não precisa perfeição, é treino
+        ts = ts + timedelta(seconds=tf_seconds)  # não precisa perfeição, é treino
 
         out.append(
             Candle(

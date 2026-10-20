@@ -45,7 +45,8 @@ class SignalEngine:
         # penaliza operar em notícias MUITO fortes (puxa para WAIT)
         news_penalty = min(2.0, max(0.0, news_impact / 2.5))
 
-        score = trend + momentum - news_penalty
+        raw_score = trend + momentum
+        score = max(0.0, abs(raw_score) - news_penalty) * (1.0 if raw_score >= 0 else -1.0)
 
         side = "WAIT"
         if score >= float(self.config.threshold):
