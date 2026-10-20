@@ -49,7 +49,11 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
    não envia ordens, não garante rentabilidade e não é ativado automaticamente.
 
 O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
-três timeframes e temas claro/escuro. Indicadores adicionais aparecem nos sinais e no motor.
+períodos de **1, 5 e 15 minutos** quando os dados de origem permitem, e temas claro/escuro.
+Ao importar candles de 5 minutos, por exemplo, o período de 1 minuto não é oferecido.
+O eixo do tempo exibe o horário de Brasília. Dados sintéticos seguem uma sequência
+contínua e não representam pregões, feriados ou horários oficiais da B3.
+Indicadores adicionais aparecem nos sinais e no motor.
 Não há cotações em tempo real nem livro real conectado. Dados sintéticos não medem rentabilidade real.
 
 ## Histórico CSV

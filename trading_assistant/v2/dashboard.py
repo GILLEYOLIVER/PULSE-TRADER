@@ -18,6 +18,7 @@ from .ledger import Ledger
 from .strategy import Strategy
 from .backtest import metrics,run_backtest,save_report
 from .chart_raster import antialiased_lines_png
+from .session import local_time
 
 class Dashboard:
     def __init__(self,data_dir=None):
@@ -45,7 +46,8 @@ class Dashboard:
         self.bars=[];self.feed=[];self.cursor=0;self.running=False;self.timer=None
         self.window=70;self.offset=0;self.dark=True;self._chart_image=None
         self.symbol=tk.StringVar(value="WIN");self.strategy=tk.StringVar(value="trend")
-        self.timeframe=tk.StringVar(value="60");self.auto=tk.BooleanVar(value=True)
+        self._period_seconds={"1 min":60,"5 min":300,"15 min":900}
+        self.timeframe=tk.StringVar(value="1 min");self.auto=tk.BooleanVar(value=True)
         self.status=tk.StringVar(value="PAPER | Fonte: SYNTHETIC | Sem conexão com corretora")
         self.summary=tk.StringVar();self.signal_text=tk.StringVar(value="Aguardando 35 candles fechados. Confiança estatística: indisponível.")
         self.metrics={key:tk.StringVar(value="—") for key in ("capital","day","exposure","positions","trades","emergency")}
@@ -100,10 +102,10 @@ class Dashboard:
         self._button(controls,"Zoom −",lambda:self.zoom(1.3))
         self._button(controls,"← Anterior",lambda:self.pan(20))
         self._button(controls,"Mais recente →",lambda:self.pan(-20))
-        ttk.Label(controls,text="Período",style="Section.TLabel").pack(side="left",padx=(12,6))
-        combo=ttk.Combobox(controls,textvariable=self.timeframe,values=("60","300","900"),width=7,state="readonly")
-        combo.pack(side="left");combo.bind("<<ComboboxSelected>>",lambda _:self.draw())
-        ttk.Label(controls,text="seg",style="Section.TLabel").pack(side="left",padx=5)
+        ttk.Label(controls,text="Cada candle",style="Section.TLabel").pack(side="left",padx=(12,6))
+        self.period_combo=ttk.Combobox(controls,textvariable=self.timeframe,
+                                       values=tuple(self._period_seconds),width=8,state="readonly")
+        self.period_combo.pack(side="left");self.period_combo.bind("<<ComboboxSelected>>",lambda _:self.change_period())
         self.chart=tk.Canvas(charttab,highlightthickness=0,height=390)
         self.chart.pack(fill="both",expand=True,pady=(8,5))
         self.chart.bind("<Configure>",lambda _:self.draw())
@@ -210,7 +212,22 @@ class Dashboard:
         self.cursor=next((i for i,b in enumerate(self.feed) if not last or b.ts>=datetime.fromisoformat(last)),len(self.feed))
         self.bars=self.feed[max(0,self.cursor-1000):self.cursor]
         self.engine.history[self.symbol.get()]=self.bars.copy()
+        self._configure_periods()
         self.status.set("PAPER | "+("Fonte: "+self.feed[0].source if self.feed else "Sem dados")+" | Replay local; corretora desconectada")
+
+    def _configure_periods(self):
+        base=self.feed[0].seconds if self.feed else 60
+        available=[seconds for seconds in (60,300,900) if seconds>=base and seconds%base==0]
+        if base not in available:available.insert(0,base)
+        self._period_seconds={f"{seconds//60} min" if seconds%60==0 else f"{seconds} s":seconds
+                              for seconds in available}
+        self.period_combo.configure(values=tuple(self._period_seconds))
+        if self.timeframe.get() not in self._period_seconds:
+            self.timeframe.set(next(iter(self._period_seconds)))
+
+    def _selected_seconds(self):
+        base=self.bars[-1].seconds if self.bars else (self.feed[0].seconds if self.feed else 60)
+        return max(base,self._period_seconds.get(self.timeframe.get(),base))
 
     def _can_load(self):
         self.pause();s=self.ledger.read()
@@ -314,7 +331,11 @@ class Dashboard:
         for t in s["trades"][-100:]:self.table.insert("","end",values=("Resultado",t["id"][:10],t["symbol"],t["side"],t["qty"],round(t["exit"],2),t["exit_reason"],round(t["net"],2)))
         self.draw()
     def zoom(self,factor):self.window=max(15,min(300,int(self.window*factor)));self.draw()
-    def pan(self,delta):self.offset=max(0,min(max(0,len(self.bars)-self.window),self.offset+delta));self.draw()
+    def change_period(self):self.offset=0;self.draw()
+    def pan(self,delta):
+        count=len(aggregate(self.bars,self._selected_seconds())) if self.bars else 0
+        self.offset=max(0,min(max(0,count-self.window),self.offset+delta))
+        self.draw()
     @staticmethod
     def _ema_series(values,period):
         result=[None]*len(values)
@@ -338,11 +359,10 @@ class Dashboard:
         grid="#2b3b50" if self.dark else "#dce4ee"
         up="#48c5b1" if self.dark else "#118875"
         down="#f47787" if self.dark else "#cc5369"
-        c.create_text(26,18,anchor="w",fill=fg,text="PAPER  •  DADOS SINTÉTICOS OU HISTÓRICOS",font=("Segoe UI Semibold",10))
-        base=self.bars[-1].seconds if self.bars else 60
-        selected=max(base,int(self.timeframe.get()))
-        selected=((selected+base-1)//base)*base
+        c.create_text(26,18,anchor="w",fill=fg,text="PAPER  •  HORÁRIO DE BRASÍLIA  •  DADOS SIMULADOS OU CSV",font=("Segoe UI Semibold",10))
+        selected=self._selected_seconds()
         all_rows=aggregate(self.bars,selected) if self.bars else []
+        self.offset=min(self.offset,max(0,len(all_rows)-self.window))
         end=max(0,len(all_rows)-self.offset)
         start=max(0,end-self.window)
         rows=all_rows[start:end]
@@ -411,7 +431,7 @@ class Dashboard:
         for i in range(5):
             index=min(len(rows)-1,round(i*(len(rows)-1)/4))
             x=left+(index+.5)*step
-            c.create_text(x,h-11,text=rows[index].ts.strftime("%d/%m %H:%M"),fill=fg,
+            c.create_text(x,h-11,text=local_time(rows[index].ts).strftime("%d/%m %H:%M"),fill=fg,
                           anchor="w" if i==0 else "e" if i==4 else "center",font=("Segoe UI",9))
         c.create_text(right-10,18,anchor="e",fill="#ffd27b",text="EMA 9",font=("Segoe UI Semibold",9))
         c.create_text(right-82,18,anchor="e",fill="#a9a1ff",text="EMA 21",font=("Segoe UI Semibold",9))
