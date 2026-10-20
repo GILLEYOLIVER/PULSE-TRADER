@@ -54,7 +54,8 @@ Rico/Profit: fronteira bloqueada e documentada. Sem SDK oficial, licença, sandb
 habilitação da conta Rico. Não foi implementada uma falsa integração. Custos externos não foram
 cotados ou contratados. Feed autorizado em tempo real depende dessas permissões/dados.
 
-Sem calendário oficial B3 completo, rolagem automática, sincronização de portfólio multativo,
+O backtest de portfólio usa candles sincronizados e risco compartilhado; exige um candle de cada ativo
+em todos os intervalos. Sem calendário oficial B3 completo, rolagem automática,
 leilões/haltes, fila real, ajuste diário completo de futuros ou tributação. Margens/taxas são premissas.
 As proteções são locais ao replay e param se o programa fechar. Gaps podem superar o risco planejado.
 

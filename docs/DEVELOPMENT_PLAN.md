@@ -25,6 +25,7 @@ ordens pendentes canceladas ao detectar lacunas de dados, sem interromper saída
 Decisões: preservar código anterior, isolar o domínio novo, eliminar caminhos de execução que ignorem risco,
 não instalar serviços pagos, usar SQLite transacional e dependências opcionais.
 
-Melhorias futuras: feed oficial, registro completo dos contratos e calendário B3, portfólio sincronizado,
+Backtest de portfólio sincronizado concluído para séries completas de mesmo intervalo.
+Melhorias futuras: feed oficial, registro completo dos contratos e calendário B3,
 validação fora da amostra em histórico licenciado, desempenho estatístico com intervalos de confiança,
 interface configurável por formulários e empacotamento assinado. Nenhuma dessas etapas habilita REAL nesta versão.

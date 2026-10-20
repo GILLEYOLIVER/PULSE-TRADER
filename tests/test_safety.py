@@ -64,9 +64,29 @@ class ExtraCase(unittest.TestCase):
         specs=dict(INSTRUMENTS);specs['WDO']=replace(specs['WDO'],expiry='2026-01-05')
         ledger=Ledger();e=PaperEngine(ledger,instruments=specs);e.on_bar(bar(),False)
         self.assertIn('Expired contract',e.submit(signal())['message']);ledger.close()
-    def test_portfolio_backtest_fails_explicitly(self):
-        with self.assertRaisesRegex(ValueError,'one symbol'):
-            run_backtest(SyntheticProvider('WIN',40).bars()+SyntheticProvider('WDO',40).bars())
+    def test_synchronized_portfolio_backtest(self):
+        bars=sorted(SyntheticProvider('WIN',40).bars()+SyntheticProvider('WDO',40).bars(),key=lambda b:(b.ts,b.symbol))
+        result=run_backtest(bars)
+        self.assertEqual(result['bars'],80)
+        self.assertEqual(len(result['equity']),41)
+        self.assertEqual(set(result['benchmark']['legs']),{'WIN','WDO'})
+        self.assertEqual(result,run_backtest(bars))
+        with self.assertRaisesRegex(ValueError,'synchronized'):
+            run_backtest(bars[:-1])
+
+    def test_portfolio_entries_use_only_synchronized_opens(self):
+        filled=[]
+        for wdo_low in (999,900):
+            ledger=Ledger();e=PaperEngine(ledger,costs=ExecutionSettings(spread_ticks=0,slippage_ticks=0,fee_per_unit=0))
+            e.on_bars([bar(symbol='WIN'),bar(symbol='WDO')],False)
+            e.submit(signal(symbol='WIN'),'win')
+            e.submit(signal(symbol='WDO'),'wdo')
+            next_ts=START+timedelta(minutes=1)
+            e.on_bars([bar(next_ts,symbol='WIN'),bar(next_ts,symbol='WDO',low=wdo_low)],False)
+            filled.append(ledger.read()['orders']['win']['filled_qty'])
+            ledger.close()
+        self.assertEqual(filled[0],filled[1])
+        self.assertGreater(filled[0],0)
     def test_later_day_resets_day_block_not_week(self):
         ledger=Ledger();e=PaperEngine(ledger)
         with ledger.transaction() as s:

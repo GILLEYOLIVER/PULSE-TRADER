@@ -122,77 +122,97 @@ class PaperEngine:
         self.ledger.audit(ts,"position_closed",trade)
 
     def on_bar(self,b:Bar,automatic=True):
-        """One completed candle. Risk at open cannot see its close/high/low."""
-        if b.symbol not in self.specs: raise ValueError("Unknown instrument; configure explicitly")
+        """Process one completed candle, preserving the single-symbol API."""
+        return self.on_bars([b],automatic)[0]
+
+    def on_bars(self,bars,automatic=True):
+        """Process synchronized candles; entries see every open, never a current close."""
+        bars=sorted(list(bars),key=lambda b:b.symbol)
+        if not bars: raise ValueError("No candles")
+        if len({b.symbol for b in bars})!=len(bars) or len({(b.ts,b.seconds) for b in bars})!=1:
+            raise ValueError("Candles must have unique symbols and synchronized intervals")
+        if any(b.symbol not in self.specs for b in bars):
+            raise ValueError("Unknown instrument; configure explicitly")
         with self.ledger.transaction() as s:
-            if not s["connected"]: return None
-            previous=s["last_bars"].get(b.symbol)
-            if previous and aware(b.ts)<datetime.fromisoformat(previous):
-                # Exact replay ignored; revised historical candle is rejected.
-                if s["last_ohlcv"].get(b.symbol)==self._bar_key(b): return None
-                raise ValueError("Out-of-order/revised candle")
+            if not s["connected"]: return [None]*len(bars)
+            replays=[]
+            for b in bars:
+                previous=s["last_bars"].get(b.symbol)
+                if previous and aware(b.ts)<datetime.fromisoformat(previous):
+                    if s["last_ohlcv"].get(b.symbol)!=self._bar_key(b):
+                        raise ValueError("Out-of-order/revised candle")
+                    replays.append(b.symbol)
+            if replays:
+                if len(replays)==len(bars): return [None]*len(bars)
+                raise ValueError("Partial replay of synchronized candles")
             sources=s["last_sources"]
-            if b.symbol in sources and sources[b.symbol]!=b.source and any(p["symbol"]==b.symbol for p in s["positions"].values()):
-                raise ValueError("Cannot change data source with an open position")
-            sources[b.symbol]=b.source
-            # A missing interval makes the previous candle's liquidity unusable.
-            # Cancel entries before the current open; protective exits below still run.
-            if previous and (b.ts-datetime.fromisoformat(previous)).total_seconds()>self.limits.max_data_age_seconds:
-                for o in s["orders"].values():
-                    if o["symbol"]==b.symbol and o["status"]=="NEW":
-                        expired=b.ts>datetime.fromisoformat(o["expires"])
-                        o["status"]="REJECTED" if expired else "CANCELLED"
-                        o["message"]="Expired signal" if expired else "Missing candles before next open"
-                        o["reserved_risk"]=0.
-                s.setdefault("liquidity",{}).pop(b.symbol,None)
-                self.ledger.audit(b.ts,"data_gap",{"symbol":b.symbol,"previous_close":previous,
-                                                    "next_open":b.ts.isoformat(),"entries_cancelled":True})
-            # Reconcile at current open before entries (no lookahead sizing).
-            s["marks"][b.symbol]=b.open
-            s["last_bars"][b.symbol]=b.ts.isoformat()
-            self.risk.block_reason(s,b.ts)
-            for o in list(s["orders"].values()):
-                if o["status"]=="NEW" and o["symbol"]==b.symbol:
+            for b in bars:
+                previous=s["last_bars"].get(b.symbol)
+                if b.symbol in sources and sources[b.symbol]!=b.source and any(p["symbol"]==b.symbol for p in s["positions"].values()):
+                    raise ValueError("Cannot change data source with an open position")
+                sources[b.symbol]=b.source
+                if previous and (b.ts-datetime.fromisoformat(previous)).total_seconds()>self.limits.max_data_age_seconds:
+                    for o in s["orders"].values():
+                        if o["symbol"]==b.symbol and o["status"]=="NEW":
+                            expired=b.ts>datetime.fromisoformat(o["expires"])
+                            o["status"]="REJECTED" if expired else "CANCELLED"
+                            o["message"]="Expired signal" if expired else "Missing candles before next open"
+                            o["reserved_risk"]=0.
+                    s.setdefault("liquidity",{}).pop(b.symbol,None)
+                    self.ledger.audit(b.ts,"data_gap",{"symbol":b.symbol,"previous_close":previous,
+                                                        "next_open":b.ts.isoformat(),"entries_cancelled":True})
+                s["marks"][b.symbol]=b.open
+                s["last_bars"][b.symbol]=b.ts.isoformat()
+            self.risk.block_reason(s,bars[0].ts)
+            by_symbol={b.symbol:b for b in bars}
+            for o in sorted(list(s["orders"].values()),key=lambda o:(o["symbol"],o["id"])):
+                b=by_symbol.get(o["symbol"])
+                if b is not None and o["status"]=="NEW":
                     if sources[b.symbol]!=o.get("source",b.source):
-                        o["status"]="REJECTED";o["message"]="Data source changed"
+                        o["status"]="REJECTED";o["message"]="Data source changed";o["reserved_risk"]=0.
                     elif b.ts>=datetime.fromisoformat(o["signal_ts"]): self._fill(s,o,b)
-            # Stops first when both barriers touched; gaps stop at worse open.
-            for p in list(s["positions"].values()):
-                if p["symbol"]!=b.symbol: continue
-                buy=p["side"]=="BUY"
-                hit_stop=b.low<=p["stop"] if buy else b.high>=p["stop"]
-                hit_target=b.high>=p["target"] if buy else b.low<=p["target"]
-                if hit_stop:
-                    self._close(s,p,min(b.open,p["stop"]) if buy else max(b.open,p["stop"]),"STOP",b.ts+timedelta(seconds=b.seconds))
-                elif hit_target:
-                    self._close(s,p,p["target"],"TARGET",b.ts+timedelta(seconds=b.seconds))
-                else:
-                    # Adjustments apply NEXT bar; never retrospectively to this bar.
-                    direction=1 if buy else -1
-                    r=abs(p["entry"]-p["initial_stop"])
-                    if self.costs.break_even_r and (b.close-p["entry"])*direction>=r*self.costs.break_even_r:
-                        candidate=p["entry"]+direction*2*self.costs.fee_per_unit/p["point_value"]
-                        p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
-                    history=self.history.get(b.symbol,[])
-                    if self.costs.trailing_atr and len(history)>=35:
-                        from .indicators import snapshot
-                        a=snapshot(history)["atr"]
-                        candidate=b.close-direction*self.costs.trailing_atr*a
-                        p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
-            s["marks"][b.symbol]=b.close
-            s["last_bars"][b.symbol]=(b.ts+timedelta(seconds=b.seconds)).isoformat()
-            s["last_ohlcv"][b.symbol]=self._bar_key(b)
-            s.setdefault("liquidity",{})[b.symbol]=b.volume
-            s["sequence"]+=1
-            self.risk.block_reason(s,b.ts+timedelta(seconds=b.seconds))
-        history=self.history.setdefault(b.symbol,[])
-        history.append(b)
-        del history[:-1000]
-        d=self.strategy.evaluate(history)
-        self.last_decision=d
-        if automatic and d and d.side!="WAIT":
-            self.submit(d)
-        return d
+            for b in bars:
+                # Stops first when both barriers touched; gaps stop at worse open.
+                for p in list(s["positions"].values()):
+                    if p["symbol"]!=b.symbol: continue
+                    buy=p["side"]=="BUY"
+                    hit_stop=b.low<=p["stop"] if buy else b.high>=p["stop"]
+                    hit_target=b.high>=p["target"] if buy else b.low<=p["target"]
+                    if hit_stop:
+                        self._close(s,p,min(b.open,p["stop"]) if buy else max(b.open,p["stop"]),"STOP",b.ts+timedelta(seconds=b.seconds))
+                    elif hit_target:
+                        self._close(s,p,p["target"],"TARGET",b.ts+timedelta(seconds=b.seconds))
+                    else:
+                        # Adjustments apply NEXT bar; never retrospectively to this bar.
+                        direction=1 if buy else -1
+                        r=abs(p["entry"]-p["initial_stop"])
+                        if self.costs.break_even_r and (b.close-p["entry"])*direction>=r*self.costs.break_even_r:
+                            candidate=p["entry"]+direction*2*self.costs.fee_per_unit/p["point_value"]
+                            p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
+                        history=self.history.get(b.symbol,[])
+                        if self.costs.trailing_atr and len(history)>=35:
+                            from .indicators import snapshot
+                            a=snapshot(history)["atr"]
+                            candidate=b.close-direction*self.costs.trailing_atr*a
+                            p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
+            for b in bars:
+                s["marks"][b.symbol]=b.close
+                s["last_bars"][b.symbol]=(b.ts+timedelta(seconds=b.seconds)).isoformat()
+                s["last_ohlcv"][b.symbol]=self._bar_key(b)
+                s.setdefault("liquidity",{})[b.symbol]=b.volume
+                s["sequence"]+=1
+            self.risk.block_reason(s,bars[0].ts+timedelta(seconds=bars[0].seconds))
+        decisions=[]
+        for b in bars:
+            history=self.history.setdefault(b.symbol,[])
+            history.append(b)
+            del history[:-1000]
+            decisions.append(self.strategy.evaluate(history))
+        self.last_decision=decisions[-1]
+        if automatic:
+            for d in decisions:
+                if d and d.side!="WAIT": self.submit(d)
+        return decisions
 
     @staticmethod
     def _bar_key(b):

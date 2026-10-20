@@ -22,7 +22,8 @@ def main(argv=None):
         root=tkinter.Tk();root.withdraw();root.update();root.destroy()
         print(json.dumps({"python":sys.version,"sqlite":sqlite3.sqlite_version,"tk":"OK","customtkinter":bool(importlib.util.find_spec("customtkinter")),"live":"DISABLED"},indent=2));return
     bars=CSVProvider(a.csv).bars() if a.csv else SyntheticProvider(a.symbol,a.bars,a.seed,a.seconds).bars()
-    if len({b.symbol for b in bars})!=1: raise ValueError("CLI backtest supports one asset per run; split multi-asset CSV")
+    if len({b.symbol for b in bars})!=1 and a.command!="backtest":
+        raise ValueError("This command supports one asset per run; use backtest for synchronized portfolio CSV")
     calendar=SessionCalendar.from_config(json.loads(Path(a.calendar_json).read_text(encoding="utf-8"))) if a.calendar_json else None
     if a.command=="train":
         from .ml import train_temporal

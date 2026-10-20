@@ -83,7 +83,9 @@ Informe a origem verdadeira e use somente dados que você tem autorização para
 O timestamp representa a abertura de um candle **já encerrado**. Fuso é obrigatório.
 Valores inválidos, duplicatas, períodos sobrepostos e mistura de origem ou duração para o mesmo ativo
 são rejeitados. A agregação omite buckets incompletos.
-Use uma série por ativo por execução de backtest. Na UI, a troca de série exige posições encerradas;
+O backtest aceita vários ativos em um CSV quando há exatamente um candle de cada ativo em cada intervalo sincronizado.
+As entradas usam as aberturas de todos os ativos antes de qualquer máxima, mínima ou fechamento do intervalo.
+Walk-forward, sensibilidade, treino e UI continuam com uma série por execução. Na UI, a troca de série exige posições encerradas;
 o mesmo ledger não pode voltar no tempo. Para um experimento independente, escolha outro `PULSE_DATA_DIR`
 sem apagar o estado anterior. Nunca use isso para representar limites de uma conta real.
 
@@ -143,7 +145,7 @@ se stop e alvo forem tocados no mesmo candle, considera stop primeiro. Trailing 
 
 - Rico/Profit: fronteira bloqueada; falta confirmar habilitação, licença, SDK e ambiente autorizado.
 - Sem feed B3 em tempo real, calendário oficial carregado, rolagem automática, leilões ou simulação de fila.
-- Backtest por um ativo; portfólio multativo sincronizado ainda não implementado.
+- Backtest de portfólio exige candles sincronizados e completos para todos os ativos; não simula horários de negociação distintos.
 - Taxas/margens são entradas de simulação, sem tributação ou ajuste diário completo de futuros.
 - ML opcional simples, com validação temporal e baselines; não foi validado para operar mercados.
 - CustomTkinter e Pillow foram exercitados no ambiente virtual local; empacotamento `.exe` e distribuição externa ainda não foram validados.
