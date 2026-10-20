@@ -32,7 +32,12 @@ proteções hospedadas na corretora. Não é adequado a operação real.
 
 Expiração de Instrument pode ser configurada no domínio. Séries contínuas não têm rolagem implícita.
 SessionCalendar só declara sessão B3 aberta quando fornecido como verificado; o replay não aplica feriados
-oficiais automaticamente. Horários start_hour/end_hour restringem a simulação conforme a configuração.
+oficiais automaticamente. Quando um calendário é informado à interface ou CLI, cada entrada também passa
+pela sua janela de sessão e feriados; saídas protetivas continuam. `verified` é uma declaração do usuário,
+não certificação da B3. Horários start_hour/end_hour restringem a simulação conforme a configuração.
+Quantidades, horas, latência e duração de candles precisam ser inteiros; frações e booleanos são rejeitados.
+As premissas de limites, custos, estratégia e calendário são imutáveis no motor após a criação; a interface
+aplica uma nova configuração validada e persistida em vez de alterar esses objetos em memória.
 
 Referências técnicas consultadas em 20/10/2026: páginas oficiais B3 de Futuro Mini de Ibovespa,
 Futuro de Ibovespa, Futuro Míni de Taxa de Câmbio e Futuro de Taxa de Câmbio (links em INTEGRATIONS).

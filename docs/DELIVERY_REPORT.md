@@ -17,6 +17,8 @@ não calibra confiança nem pode ignorar o risco ou ativar execução.
 Dashboard desktop com Tk/CustomTkinter opcional, candles, volume, EMA9/21, zoom, navegação,
 timeframes, temas, sinais, resultados, controles simples de risco/estratégia e JSON avançado.
 Entradas pendentes são canceladas ao detectar candles ausentes; stops abertos continuam ativos no replay.
+Um calendário de sessão informado e conferido pelo usuário pode bloquear entradas B3 fora da janela e em feriados;
+o mesmo controle é usado pelo dashboard, CLI e backtest, sem impedir saídas protetivas.
 Scripts Windows para venv, inicialização e diagnóstico; `iniciar.cmd` abre o aplicativo.
 O modo básico da instalação cria venv sem pip: o núcleo não precisa de pacotes externos.
 
@@ -30,13 +32,17 @@ A UI anterior e módulos de notícias/análise foram preservados, sem execução
 
 ## Verificação efetiva
 
-- 47 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
+- 51 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
 - Compilação de todos os módulos aprovada.
 - Smoke da interface Windows: formulário de risco, 80 candles, renderização, zoom, pan, tema, timeframe e emergência aprovados.
+- Smoke repetido no ambiente virtual com CustomTkinter 6.0.0 e Pillow 13.0.0, aprovado.
+- `scripts/install.ps1 -Ui` concluiu a instalação mínima da interface e o diagnóstico confirmou LIVE desabilitado.
 - Diagnóstico Python 3.12.10 / SQLite 3.49.1 / Tk aprovado.
 - Venv criado e diagnóstico do instalador aprovado.
 - Demo de 1.000 candles, walk-forward de 500, treino ML de 300 e sensibilidade executados.
 - CSV exportado/reimportado produz relatório idêntico no teste end-to-end.
+- Demo de 250 candles com feriado informado pelo usuário bloqueou todas as entradas B3 e registrou o calendário no relatório.
+- Calendário opcional também passou em um fold walk-forward e nove pontos de sensibilidade com dados sintéticos.
 - Histórico original do Git recuperado com os 17 commits; integridade verificada.
 
 Não há validação de rentabilidade. O modelo sintético de exemplo ficou abaixo de baselines no holdout;
@@ -52,8 +58,8 @@ Sem calendário oficial B3 completo, rolagem automática, sincronização de por
 leilões/haltes, fila real, ajuste diário completo de futuros ou tributação. Margens/taxas são premissas.
 As proteções são locais ao replay e param se o programa fechar. Gaps podem superar o risco planejado.
 
-Instalação de bibliotecas extras falhou por DNS; fallback Tk foi testado, CustomTkinter não.
-Empacotamento `.exe` foi avaliado, mas não construído sem dependências/PyInstaller.
+CustomTkinter e Pillow foram instalados apenas no ambiente virtual local; o núcleo continua independente deles.
+Empacotamento `.exe` foi avaliado, mas ainda não construído ou homologado.
 Backtest extenso pode bloquear a janela; use CLI para séries longas.
 
 ## Instalar/executar
@@ -64,13 +70,10 @@ Ambiente isolado: `.\scripts\install.ps1` e `.\scripts\start.ps1`.
 
 ## Entrega Git
 
-Branch solicitada: `feature/pulse-trader-v2`; `main` preservada.
-Publicação por conector GitHub, pois clone/push direto falhou por DNS.
-Commits de implementação, interface/Windows e documentação/testes preparados separadamente.
-Pull Request de revisão sem merge automático, conforme acesso disponível.
+O PR #1 foi integrado a `main` em 20/10/2026 por solicitação explícita do usuário, no commit `cfdc55b`.
+Esta continuação está em `feature/pulse-trader-v2` e precisa de revisão antes de novo merge;
+o trabalho atual não altera `main` automaticamente.
 
 ## Pasta local
 
-A cópia editável desta entrega está em `C:\Users\A1\Documents\ChatGPT\pulse`.
-A pasta antiga em `C:\Users\A1\Documents\Codex\2026-10-20\new-chat\PULSE-TRADER` não recebe automaticamente
-essas modificações. O PR contém o código para revisão; não houve merge em `main`.
+A cópia editável desta entrega está em `C:\Users\A1\Documents\ChatGPT\PR-TR`.

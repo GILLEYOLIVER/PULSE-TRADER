@@ -17,6 +17,9 @@ Copie o banco com o programa fechado ou use sqlite backup. Restaurar uma cópia 
 seu relógio e limites de simulação; não usar esta ferramenta para contabilizar uma conta real.
 Não apagar runtime para esconder perdas. Estados de emergência continuam após reiniciar.
 O bloqueio depende do relógio de replay, não de cotações reais ou proteções hospedadas na corretora.
+O calendário opcional é fornecido pelo usuário; `verified: true` não prova que datas e horários são oficiais.
+Um calendário incompleto pode admitir entradas em períodos em que a B3 não negocia.
 
-Dependências opcionais devem ser revisadas e travadas antes de distribuição externa. Não foi possível
-consultar vulnerabilidades de pacotes instalados neste ambiente sem rede. O núcleo novo usa stdlib.
+Dependências opcionais devem ser revisadas e travadas antes de distribuição externa. CustomTkinter e Pillow
+foram instalados para o teste local; uma auditoria de vulnerabilidades e assinatura do pacote ainda faltam.
+O núcleo novo usa stdlib.
