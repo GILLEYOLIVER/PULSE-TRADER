@@ -131,6 +131,18 @@ class PaperEngine:
             if b.symbol in sources and sources[b.symbol]!=b.source and any(p["symbol"]==b.symbol for p in s["positions"].values()):
                 raise ValueError("Cannot change data source with an open position")
             sources[b.symbol]=b.source
+            # A missing interval makes the previous candle's liquidity unusable.
+            # Cancel entries before the current open; protective exits below still run.
+            if previous and (b.ts-datetime.fromisoformat(previous)).total_seconds()>self.limits.max_data_age_seconds:
+                for o in s["orders"].values():
+                    if o["symbol"]==b.symbol and o["status"]=="NEW":
+                        expired=b.ts>datetime.fromisoformat(o["expires"])
+                        o["status"]="REJECTED" if expired else "CANCELLED"
+                        o["message"]="Expired signal" if expired else "Missing candles before next open"
+                        o["reserved_risk"]=0.
+                s.setdefault("liquidity",{}).pop(b.symbol,None)
+                self.ledger.audit(b.ts,"data_gap",{"symbol":b.symbol,"previous_close":previous,
+                                                    "next_open":b.ts.isoformat(),"entries_cancelled":True})
             # Reconcile at current open before entries (no lookahead sizing).
             s["marks"][b.symbol]=b.open
             s["last_bars"][b.symbol]=b.ts.isoformat()

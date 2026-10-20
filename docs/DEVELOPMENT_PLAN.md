@@ -15,6 +15,9 @@
 | Windows | Inicialização, instalação venv, diagnóstico, variáveis de ambiente | `.exe` avaliado e adiado por falta de dependências/rede |
 | GitHub | Commits na branch de desenvolvimento e PR sem merge, conforme disponibilidade | Ver relatório de entrega para os identificadores efetivamente criados |
 
+Complemento 2.0.1: controles simples de risco e estratégia na interface, com JSON avançado preservado;
+ordens pendentes canceladas ao detectar lacunas de dados, sem interromper saídas protetivas simuladas.
+
 Decisões: preservar código anterior, isolar o domínio novo, eliminar caminhos de execução que ignorem risco,
 não instalar serviços pagos, usar SQLite transacional e dependências opcionais.
 

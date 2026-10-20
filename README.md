@@ -36,8 +36,11 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
 
 1. Abra o aplicativo. A barra indica PAPER e a origem dos dados.
 2. Escolha o ativo e **Carregar simulação**, ou use **Importar CSV**.
-3. Em **Risco, custos e estratégias**, edite os valores JSON e clique em **Validar e aplicar**.
-   `risk_fraction: 0.005` significa 0,5%. Perdas e meta são valores monetários.
+3. Em **Risco e estratégias**, ajuste capital, risco por operação, perda diária,
+   quantidades e estratégia nos controles principais; clique em **Aplicar controles principais**.
+   Para outros limites, custos e horários, edite o JSON e clique em **Validar e aplicar configuração**.
+   No formulário, `0,5` significa 0,5%; no JSON, `risk_fraction: 0.005` significa 0,5%.
+   Perdas e meta são valores monetários simulados.
 4. Clique em **Iniciar** ou **Próximo candle**. A geração de sinais requer 35 candles fechados.
 5. A execução automática e os botões manuais passam pelo mesmo motor de risco.
 6. A emergência cancela entradas pendentes e bloqueia novas entradas. Stops existentes continuam;
@@ -100,6 +103,9 @@ Não força um contrato quando o orçamento é insuficiente. Limites diário/sem
 quantidade de operações, posições, ativos, estratégias, horário, spread, slippage e cooldown são configuráveis.
 As decisões, fills, posições, cancelamentos e bloqueios são gravados em transações SQLite.
 Entradas são no próximo candle, com latência configurável e liquidez estimada pelo **volume anterior**.
+Quando faltam candles por mais tempo que o limite de idade dos dados, ordens pendentes daquele ativo
+são canceladas antes da próxima abertura; sinais expirados são rejeitados. Stops de posições
+existentes continuam sendo avaliados no candle seguinte, com risco de gap.
 Preenchimento parcial usa IOC: o restante é cancelado. Stops com gaps usam o pior preço de abertura;
 se stop e alvo forem tocados no mesmo candle, considera stop primeiro. Trailing e break-even são opcionais.
 

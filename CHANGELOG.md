@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 - 2026-10-20
+
+- Added simple controls for core PAPER limits and strategy, with the full JSON configuration retained.
+- Cancelled pending entries after missing candles, without skipping protective exits; audited the gap.
+- Added regression coverage for gaps and GUI smoke coverage for the risk form.
+- Chart periods are shown in minutes, restricted to the imported data granularity, and labeled in Brasilia time.
+
 ## 2.0.0 — 2026-10-20
 
 - Added isolated PAPER domain with historical CSV and deterministic synthetic providers.

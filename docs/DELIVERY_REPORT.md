@@ -15,7 +15,8 @@ normalização somente no treino, purge temporal, baselines, checksum e aviso de
 não calibra confiança nem pode ignorar o risco ou ativar execução.
 
 Dashboard desktop com Tk/CustomTkinter opcional, candles, volume, EMA9/21, zoom, navegação,
-timeframes, temas, sinais, resultados e edição JSON de risco/custos/estratégias.
+timeframes, temas, sinais, resultados, controles simples de risco/estratégia e JSON avançado.
+Entradas pendentes são canceladas ao detectar candles ausentes; stops abertos continuam ativos no replay.
 Scripts Windows para venv, inicialização e diagnóstico; `iniciar.cmd` abre o aplicativo.
 O modo básico da instalação cria venv sem pip: o núcleo não precisa de pacotes externos.
 
@@ -29,9 +30,9 @@ A UI anterior e módulos de notícias/análise foram preservados, sem execução
 
 ## Verificação efetiva
 
-- 46 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
+- 47 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
 - Compilação de todos os módulos aprovada.
-- Smoke da interface Windows: 80 candles, renderização, zoom, pan, tema, timeframe e emergência aprovados.
+- Smoke da interface Windows: formulário de risco, 80 candles, renderização, zoom, pan, tema, timeframe e emergência aprovados.
 - Diagnóstico Python 3.12.10 / SQLite 3.49.1 / Tk aprovado.
 - Venv criado e diagnóstico do instalador aprovado.
 - Demo de 1.000 candles, walk-forward de 500, treino ML de 300 e sensibilidade executados.
@@ -70,5 +71,6 @@ Pull Request de revisão sem merge automático, conforme acesso disponível.
 
 ## Pasta local
 
-A solicitação posterior de mover para `C:\Projetos\PULSE-TRADER` foi tentada e retornou acesso negado.
-O projeto permanece na pasta original da sessão; nenhum conteúdo foi perdido ou deixado pela metade no destino.
+A cópia editável desta entrega está em `C:\Users\A1\Documents\ChatGPT\pulse\PULSE-TRADER`.
+A pasta antiga em `C:\Users\A1\Documents\Codex\2026-10-20\new-chat\PULSE-TRADER` não recebe automaticamente
+essas modificações. O PR contém o código para revisão; não houve merge em `main`.

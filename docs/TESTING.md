@@ -9,15 +9,16 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-46 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
+47 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
 profit stop, stale data, duplicate orders, manual oversizing, conservative barriers and gaps, sell trades,
 partial IOC fill, zero liquidity, cancel, disconnect/reconnect, emergency, rollback after injected failures,
 positions/blocks across restart, revised candles, invalid values, CSV roundtrip, aggregation, reproducibility,
-time partitions, ML checksums, and denied real integration methods.
+time partitions, ML checksums, denied real integration methods, and pending-order cancellation after a data gap
+while retaining protective stops on existing positions.
 
 The first run found four sandbox temporary-directory access errors. Tests were changed to create their
 isolated temporary directories under the project; none were skipped. Subsequent suite runs passed.
-The GUI smoke builds the real Tk window, steps 80 candles, renders chart, zooms/pans, changes theme/timeframe,
+The GUI smoke builds the real Tk window, applies the risk form, steps 80 candles, renders chart, zooms/pans, changes theme/timeframe,
 and activates the persistent emergency. It uses a temporary ledger and closes the window cleanly.
 CustomTkinter could not be installed due DNS, so that optional rendering path was not exercised.
 

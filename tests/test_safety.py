@@ -42,6 +42,23 @@ class ExtraCase(unittest.TestCase):
             e.on_bar(bar(),False);e.submit(signal(),'x');e.on_bar(bar(START+timedelta(minutes=1),volume=volume),False)
             states.append(ledger.read()['orders']['x']['filled_qty']);ledger.close()
         self.assertEqual(states[0],states[1]);self.assertGreater(states[0],0)
+    def test_missing_candles_cancel_entry_but_keep_protective_stop(self):
+        ledger=Ledger();e=PaperEngine(ledger,costs=ExecutionSettings(spread_ticks=0,slippage_ticks=0,fee_per_unit=0))
+        e.on_bar(bar(),False)
+        e.submit(replace(signal(),expires=START+timedelta(minutes=20)),"pending")
+        e.on_bar(bar(START+timedelta(minutes=10),price=995,high=997,low=994),False)
+        state=ledger.read()
+        self.assertEqual(state["orders"]["pending"]["status"],"CANCELLED")
+        self.assertEqual(state["orders"]["pending"]["reserved_risk"],0.)
+        self.assertEqual(ledger.db.execute("SELECT COUNT(*) FROM audit WHERE event='data_gap'").fetchone()[0],1)
+        ledger.close()
+
+        ledger=Ledger();e=PaperEngine(ledger,costs=ExecutionSettings(spread_ticks=0,slippage_ticks=0,fee_per_unit=0))
+        e.on_bar(bar(),False);e.submit(signal(),"filled")
+        e.on_bar(bar(START+timedelta(minutes=1)),False)
+        e.on_bar(bar(START+timedelta(minutes=10),price=995,high=997,low=994),False)
+        self.assertEqual(ledger.read()["trades"][0]["exit_reason"],"STOP")
+        ledger.close()
     def test_explicit_expiry(self):
         from trading_assistant.v2.models import INSTRUMENTS
         specs=dict(INSTRUMENTS);specs['WDO']=replace(specs['WDO'],expiry='2026-01-05')

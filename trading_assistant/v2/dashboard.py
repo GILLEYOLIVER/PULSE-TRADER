@@ -134,6 +134,28 @@ class Dashboard:
 
         settings=ttk.Frame(self.tabs,padding=12);self.tabs.add(settings,text="Risco e estratégias")
         ttk.Label(settings,text="Valores em R$; risco por operação em fração (0.005 = 0,5%). Margens e custos são premissas de simulação.",wraplength=1000).pack(anchor="w",padx=8,pady=8)
+        quick=ttk.LabelFrame(settings,text="Controles principais (PAPER)",padding=(12,8));quick.pack(fill="x",padx=8,pady=(0,10))
+        self.quick_fields={
+            "capital":("Capital R$",self.limits.capital),
+            "risk_percent":("Risco por operação %",self.limits.risk_fraction*100),
+            "daily_loss":("Perda máxima/dia R$",self.limits.daily_loss),
+            "max_contracts":("Contratos máximos",self.limits.max_contracts),
+            "max_trades":("Operações/dia",self.limits.max_trades),
+            "strategy":("Estratégia",self.engine.strategy.name),
+        }
+        self.quick_vars={}
+        for col,(key,(label,value)) in enumerate(self.quick_fields.items()):
+            quick.columnconfigure(col,weight=1)
+            ttk.Label(quick,text=label,style="Section.TLabel").grid(row=0,column=col,sticky="w",padx=4)
+            var=tk.StringVar(value=str(value));self.quick_vars[key]=var
+            if key=="strategy":
+                widget=ttk.Combobox(quick,textvariable=var,values=("trend","breakout","pullback"),state="readonly",width=15)
+            else:
+                widget=ttk.Entry(quick,textvariable=var,width=17)
+            widget.grid(row=1,column=col,sticky="ew",padx=4,pady=(5,8))
+        ttk.Button(quick,text="Aplicar controles principais",style="Accent.TButton",
+                   command=lambda:self.guard(self.apply_quick_settings)).grid(row=2,column=0,columnspan=3,sticky="w",padx=4)
+        ttk.Label(settings,text="Configuração avançada: ativos, horários, custos, stops e demais limites em JSON.",style="Section.TLabel").pack(anchor="w",padx=8)
         self.settings_text=tk.Text(settings,height=15,font=("Consolas",11),wrap="none",padx=12,pady=10,relief="flat",highlightthickness=1)
         self.settings_text.pack(fill="both",expand=True,padx=8)
         self.settings_text.insert("1.0",json.dumps({"limits":asdict(self.limits),"execution":asdict(self.costs),"strategy":{"name":self.engine.strategy.name,"reward_r":self.engine.strategy.reward_r,"stop_atr":self.engine.strategy.stop_atr,"multi_timeframe":self.engine.strategy.multi_timeframe}},indent=2))
@@ -288,7 +310,28 @@ class Dashboard:
         limits=Limits(**data["limits"]);costs=ExecutionSettings(**data["execution"]);strategy=Strategy(**data["strategy"])
         engine=PaperEngine(self.ledger,limits,costs,strategy=strategy);engine.history=self.engine.history
         self.engine=engine;self.limits=limits;self.costs=costs
+        for key,value in (("capital",limits.capital),("risk_percent",limits.risk_fraction*100),
+                          ("daily_loss",limits.daily_loss),("max_contracts",limits.max_contracts),
+                          ("max_trades",limits.max_trades),("strategy",strategy.name)):
+            self.quick_vars[key].set(str(value))
         self.status.set("Configuração validada e salva. Execução: PAPER.");self.refresh()
+    def apply_quick_settings(self):
+        data=json.loads(self.settings_text.get("1.0","end"))
+        get=lambda key: self.quick_vars[key].get().strip().replace(",",".")
+        data["limits"].update(capital=float(get("capital")),risk_fraction=float(get("risk_percent"))/100,
+                              daily_loss=float(get("daily_loss")),max_contracts=int(get("max_contracts")),
+                              max_trades=int(get("max_trades")))
+        data["strategy"]["name"]=get("strategy")
+        # Commit the visible advanced text only after all values pass validation.
+        Limits(**data["limits"]).validate();ExecutionSettings(**data["execution"]).validate()
+        Strategy(**data["strategy"])
+        current=self.settings_text.get("1.0","end")
+        self.settings_text.delete("1.0","end")
+        self.settings_text.insert("1.0",json.dumps(data,indent=2,ensure_ascii=False))
+        try:self.apply_settings()
+        except Exception:
+            self.settings_text.delete("1.0","end");self.settings_text.insert("1.0",current)
+            raise
     def export(self):
         path=filedialog.asksaveasfilename(defaultextension=".json",initialfile="pulse-paper.json")
         if path:
