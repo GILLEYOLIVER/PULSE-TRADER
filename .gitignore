@@ -37,3 +37,4 @@ dist/
 build/
 *.spec
 .pip-temp/
+.codex/

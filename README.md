@@ -9,7 +9,7 @@ Requer Python 3.11+ com Tcl/Tk. Na pasta do projeto:
 
 ### Abrir com F5 no VS Code
 
-Abra **esta pasta `PULSE-TRADER`** no VS Code (Arquivo > Abrir Pasta), instale as extensões
+Abra **esta pasta `pulse`** no VS Code (Arquivo > Abrir Pasta), instale as extensões
 Python e Python Debugger quando o VS Code oferecer e pressione **F5**. A configuração
 `PULSE-TRADER (PAPER)` abre `main.py` com a pasta correta de trabalho, para manter o
 estado simulado em `runtime/` dentro deste projeto. Se o ambiente `.venv` ainda não

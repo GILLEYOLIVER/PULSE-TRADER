@@ -35,7 +35,9 @@ class PaperEngine:
         with self.ledger.transaction() as s:
             if key in s["orders"]:
                 old=s["orders"][key]
-                if (old["symbol"],old["side"],old["price"],old["signal_ts"]) != (d.symbol,d.side,d.price,d.ts.isoformat()):
+                if (old["symbol"],old["side"],old["price"],old["stop"],old["target"],
+                    old["signal_ts"],old["expires"],old["strategy"]) != (
+                    d.symbol,d.side,d.price,d.stop,d.target,d.ts.isoformat(),d.expires.isoformat(),d.strategy):
                     raise ValueError("Idempotency key reused for different order")
                 return dict(old)
             spec=self.specs.get(d.symbol)

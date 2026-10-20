@@ -82,7 +82,12 @@ class ExtraCase(unittest.TestCase):
         self.assertTrue(e.submit(signal(ts=later+timedelta(minutes=1)))['message'].startswith('month:'));ledger.close()
     def test_order_key_payload_conflict(self):
         ledger=Ledger();e=PaperEngine(ledger);e.on_bar(bar(),False);e.submit(signal(),'x')
-        with self.assertRaises(ValueError):e.submit(replace(signal(),price=1001),'x')
+        for changed in (
+            {'price':1001}, {'stop':997}, {'target':1011},
+            {'expires':START+timedelta(minutes=5)}, {'strategy':'breakout'},
+        ):
+            with self.subTest(changed=changed),self.assertRaises(ValueError):
+                e.submit(replace(signal(),**changed),'x')
         ledger.close()
     def test_real_equity_costs(self):
         report=run_backtest(SyntheticProvider(count=150).bars())

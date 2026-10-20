@@ -71,6 +71,6 @@ Pull Request de revisão sem merge automático, conforme acesso disponível.
 
 ## Pasta local
 
-A cópia editável desta entrega está em `C:\Users\A1\Documents\ChatGPT\pulse\PULSE-TRADER`.
+A cópia editável desta entrega está em `C:\Users\A1\Documents\ChatGPT\pulse`.
 A pasta antiga em `C:\Users\A1\Documents\Codex\2026-10-20\new-chat\PULSE-TRADER` não recebe automaticamente
 essas modificações. O PR contém o código para revisão; não houve merge em `main`.

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Reject reuse of a paper order idempotency key when its stop, target, expiry, or strategy changes.
+
 ## 2.0.1 - 2026-10-20
 
 - Added simple controls for core PAPER limits and strategy, with the full JSON configuration retained.
