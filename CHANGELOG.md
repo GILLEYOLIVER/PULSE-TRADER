@@ -1,9 +1,27 @@
 # Changelog
 
-## v0.1.0
-- Dashboard inicial (CustomTkinter)
-- Notícias: Alpha Vantage / Finnhub / GDELT
-- NewsImpactScore por ativo + decaimento
-- Recomendação BUY/SELL/WAIT + confiança
-- Gestão de risco + paper trading
-- Integração Profit Pro no roadmap
+## Unreleased
+
+- Reject reuse of a paper order idempotency key when its stop, target, expiry, or strategy changes.
+
+## 2.0.1 - 2026-10-20
+
+- Added simple controls for core PAPER limits and strategy, with the full JSON configuration retained.
+- Cancelled pending entries after missing candles, without skipping protective exits; audited the gap.
+- Added regression coverage for gaps and GUI smoke coverage for the risk form.
+- Chart periods are shown in minutes, restricted to the imported data granularity, and labeled in Brasilia time.
+
+## 2.0.0 — 2026-10-20
+
+- Added isolated PAPER domain with historical CSV and deterministic synthetic providers.
+- Added explainable indicator strategies, multi-timeframe filter, persisted risk/order/position ledger.
+- Added next-candle execution, IOC partials, costs, gaps, protective exits and persistent emergency.
+- Added reproducible backtests, walk-forward, sensitivity, per-regime results and optional temporal ML.
+- Added desktop dashboard with Tk fallback, risk/settings JSON, charts and reports, Windows scripts.
+- Disabled legacy execution bypass and all LIVE entry points; redacted secrets from audit logging.
+- Corrected legacy news bias and synthetic training timestamps; retained previous analysis modules.
+- Documented Rico/ProfitDLL requirements and unresolved external entitlements; no broker SDK binding shipped.
+
+## 0.1.0
+
+- Original CustomTkinter dashboard, news integrations, technical signals and shadow performance tracking.

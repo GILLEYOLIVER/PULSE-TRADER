@@ -1,184 +1,136 @@
-# PULSE-TRADER
+# PULSE-TRADER 2.0
 
-Dashboard estilo *Profit* + motor de sinais explicável (BUY/SELL/WAIT) com **shadow trading** (paper automático), **stops curtos + alvos longos**, e **calibração online** baseada na performance.
+Plataforma desktop de análise, replay histórico, backtesting e **operações exclusivamente simuladas (PAPER)**.
+Não conecta sua conta Rico e não contém envio real de ordens.
 
----
+## Iniciar no Windows
 
-## O que já está implementado
+Requer Python 3.11+ com Tcl/Tk. Na pasta do projeto:
 
-### 1) Redundância inteligente
-- Sinal é formado por componentes independentes (tendência, momento, impacto de notícias).
-- Cada decisão vem com **reason** (explicação) e **meta** (valores que geraram o sinal).
+### Abrir com F5 no VS Code
 
-### 2) Adaptabilidade
-- **OnlineCalibrator** ajusta periodicamente parâmetros do motor (threshold, stop ATR, alvo em R) usando a performance do shadow trading.
+Abra **esta pasta `pulse`** no VS Code (Arquivo > Abrir Pasta), instale as extensões
+Python e Python Debugger quando o VS Code oferecer e pressione **F5**. A configuração
+`PULSE-TRADER (PAPER)` abre `main.py` com a pasta correta de trabalho, para manter o
+estado simulado em `runtime/` dentro deste projeto. Se o ambiente `.venv` ainda não
+existir, execute `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1` no terminal
+do VS Code e tente F5 novamente. Use **Shift+F5** para encerrar a janela do depurador.
 
-### 3) Transparência
-- Cada sinal mostra: tendência (EMA), momento (em ATR), penalidade de notícia e score final.
-- Dashboard mostra **Confiança** (em %) e desempenho (Win rate / Avg R).
+### Abrir pelo terminal ou atalho
 
-### 4) Robustez
-- Funciona em múltiplos símbolos e timeframes (em simulação/mock).
-- Mock agora gera candles em **regimes** (trend/lateral/vol), para o motor treinar sem “saber o futuro”.
-
-### 5) Gestão de risco avançada
-- Stops e targets automáticos (baseados em ATR).
-- Position sizing por risco (opção “Risco” na UI).
-
-### 6) Validação contínua
-- **Shadow trading** abre/fecha operações automaticamente (paper) e mede:
-  - trades, win rate, avg R, profit factor, drawdown em R
-- Script de treino sintético roda milhares de velas para testar e calibrar sem dados externos.
-
----
-
-## Como rodar
-
-### 1) Criar e ativar venv
-```bash
-python -m venv .venv
-source .venv/bin/activate  # mac/linux
-# .venv\Scripts\activate  # windows
-```
-
-### 2) Instalar dependências
-```bash
-pip install -r requirements.txt
-```
-
-### 3) Abrir o app
-```bash
+```powershell
 python main.py
+# ou clique em iniciar.cmd
 ```
 
----
+O núcleo, os gráficos Canvas, o replay, o simulador e o backtest usam a biblioteca padrão.
+CustomTkinter é usado como janela quando instalado; Tkinter é o fallback testado.
+Pillow, incluído em `install.ps1 -Full`, desenha candles e médias móveis em resolução
+dobrada com antialiasing. Sem ele, as médias também são suavizadas pelo renderizador
+interno e o Canvas do Tkinter continua disponível.
+No Windows, a janela usa a escala DPI do monitor; maximize a janela para obter
+mais espaço para candles e eixos. Mais pixels melhoram a nitidez, mas não criam
+informações de mercado além das que existem no CSV ou na simulação.
+Para ambiente virtual e bibliotecas opcionais da interface anterior:
 
-## Dashboard (UI)
-
-### Recursos principais
-- **Tela cheia (windowed)** por padrão (ocupa o monitor inteiro)
-  - `F11` volta para tela cheia
-  - `ESC` volta tamanho padrão
-- **Escala vertical fixa tipo Profit**
-  - Escala: `Fixa (Profit)` ou `Auto`
-  - Faixa: define quantos “pontos/preço” a escala fixa exibe (ex.: 200)
-  - Tem um “respiro” extra para não cortar os pontos/linhas
-- **Seguir**
-  - Quando ligado, o gráfico acompanha as últimas velas (ao vivo)
-  - Quando desligado, você pode pan (◀ ▶) para olhar o histórico
-- **Livro de ofertas**
-  - Mostra **8 níveis** (para sobrar espaço na área de Ordem)
-- **Linhas de orientação no gráfico**
-  - Entrada: ciano
-  - Stop: vermelho
-  - Alvo: verde
-- **Cores de linhas na tabela**
-  - Compra = verde
-  - Venda = vermelho
-  - Esperar = azul claro
-
-### “Para que serve o botão Seguir?”
-- Mantém o gráfico no “ao vivo” (sempre mostrando as últimas velas).
-- Se você quiser olhar o histórico, desligue “Seguir” e use ◀ ▶.
-
-### “Quantos pontos o gráfico abrange? E se variar 80 pontos?”
-- Em **Escala Fixa (Profit)**, o gráfico sempre mostra uma faixa vertical fixa definida em **Faixa** (ex.: 200).
-- Se o preço variar 80 pontos, ele continua aparecendo normalmente **desde que esteja dentro da faixa**.
-- Se estourar, aumente “Faixa” (ex.: 300 / 400).
-
----
-
-## Motor de sinais (stops curtos + alvos longos)
-
-Arquivo: `trading_assistant/signals/engine.py`
-
-- Tendência: EMA rápida vs EMA lenta
-- Momento: distância do preço para EMA lenta em unidades de ATR
-- Penalidade: notícias fortes reduzem a chance de operar
-
-Stops e targets:
-- `stop_dist = stop_atr_mult * ATR`
-- `target_dist = stop_dist * reward_r`
-
-Config padrão:
-- `stop_atr_mult = 0.70` (stop curto)
-- `reward_r = 3.00` (alvo longo)
-- `min_confidence = 0.55` (evita sinal fraco)
-
----
-
-## Shadow Trading (paper automático)
-
-Arquivo: `trading_assistant/validation/performance.py`
-
-- Abre 1 trade por símbolo quando chega BUY/SELL (confiança mínima).
-- Fecha em TP/SL usando OHLC (conservador se tocar TP e SL no mesmo candle → conta SL).
-- Fecha por tempo se passar de X candles.
-- Envia eventos para a UI:
-  - `shadow_position` (desenha linhas no gráfico)
-  - `shadow_trade` (quando fecha)
-  - `performance` (snapshot)
-
----
-
-## Calibração Online
-
-Arquivo: `trading_assistant/validation/calibrator.py`
-
-- A cada N trades fechados, ajusta levemente:
-  - `threshold` (seletividade)
-  - `stop_atr_mult` (largura do stop)
-  - `reward_r` (alvo em R)
-- Sempre com limites (clamp) para evitar “explodir” parâmetros.
-
----
-
-## Treino sintético (sem dados externos)
-
-Arquivo: `trading_assistant/validation/train_synthetic.py`
-
-Roda milhares de candles sintéticos em regimes e mede performance do motor.
-
-Exemplo:
-```bash
-python -m trading_assistant.validation.train_synthetic --symbol WIN --steps 20000 --tf 5
+```powershell
+.\scripts\install.ps1
+.\scripts\install.ps1 -Full
+.\scripts\start.ps1
 ```
 
----
+Não é preciso instalar bibliotecas extras para testar a versão nova. A opção `-Full` precisa de internet.
+`PULSE_DATA_DIR` define a pasta dos bancos locais (padrão `runtime`). `.env.example` é uma referência;
+o programa lê variáveis do processo, sem carregar `.env` automaticamente.
 
-## Estrutura de pastas (principal)
+## Usar
 
+1. Abra o aplicativo. A barra indica PAPER e a origem dos dados.
+2. Escolha o ativo e **Carregar simulação**, ou use **Importar CSV**.
+3. Em **Risco e estratégias**, ajuste capital, risco por operação, perda diária,
+   quantidades e estratégia nos controles principais; clique em **Aplicar controles principais**.
+   Para outros limites, custos e horários, edite o JSON e clique em **Validar e aplicar configuração**.
+   No formulário, `0,5` significa 0,5%; no JSON, `risk_fraction: 0.005` significa 0,5%.
+   Perdas e meta são valores monetários simulados.
+4. Clique em **Iniciar** ou **Próximo candle**. A geração de sinais requer 35 candles fechados.
+5. A execução automática e os botões manuais passam pelo mesmo motor de risco.
+6. A emergência cancela entradas pendentes e bloqueia novas entradas. Stops existentes continuam;
+   **Zerar posições PAPER** encerra as posições ao último preço simulado com custos.
+7. Exporte JSON na aba de resultados. Fechar a janela preserva posições, ordens e bloqueios.
+8. Com um CSV histórico autorizado de pelo menos 200 candles de um ativo, abra
+   **Ordens e resultados > Treinar modelo com CSV**. O arquivo JSON resultante
+   mostra acerto em validação e teste, comparado com referências simples; ele
+   não envia ordens, não garante rentabilidade e não é ativado automaticamente.
+
+O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
+períodos de **1, 5 e 15 minutos** quando os dados de origem permitem, e temas claro/escuro.
+Ao importar candles de 5 minutos, por exemplo, o período de 1 minuto não é oferecido.
+O eixo do tempo exibe o horário de Brasília. Dados sintéticos seguem uma sequência
+contínua e não representam pregões, feriados ou horários oficiais da B3.
+Indicadores adicionais aparecem nos sinais e no motor.
+Não há cotações em tempo real nem livro real conectado. Dados sintéticos não medem rentabilidade real.
+
+## Histórico CSV
+
+```csv
+symbol,ts,open,high,low,close,volume,source,seconds
+WIN,2026-01-05T12:00:00+00:00,130000,130050,129980,130020,1000,USER_LICENSED_EXPORT,60
 ```
-PULSE-TRADER/
-  main.py
-  requirements.txt
-  trading_assistant/
-    app.py
-    config.py
-    core/
-      models.py
-      state.py
-    data_feeds/
-      market_stream.py
-    signals/
-      engine.py
-      technicals.py
-    risk/
-      risk_engine.py
-    ui/
-      dashboard.py
-    validation/
-      performance.py
-      calibrator.py
-      train_synthetic.py
+
+Informe a origem verdadeira e use somente dados que você tem autorização para utilizar.
+O timestamp representa a abertura de um candle **já encerrado**. Fuso é obrigatório.
+Valores inválidos, duplicatas e períodos sobrepostos são rejeitados. A agregação omite buckets incompletos.
+Use uma série por ativo por execução de backtest. Na UI, a troca de série exige posições encerradas;
+o mesmo ledger não pode voltar no tempo. Para um experimento independente, escolha outro `PULSE_DATA_DIR`
+sem apagar o estado anterior. Nunca use isso para representar limites de uma conta real.
+
+WIN, WDO, IND, DOL, PETR4 e VALE3 têm especificações iniciais. BTC/ETH representam séries spot em BRL
+fornecidas pelo usuário; conversão de USD e derivativos cripto não são implementados.
+Os símbolos raiz de futuros são apenas identificação da série importada, sem rolagem automática.
+O domínio aceita `Instrument` com vencimento explícito; confira os contratos e o calendário do seu arquivo.
+
+## Linha de comando
+
+```powershell
+python -m trading_assistant.v2.cli demo --bars 1000 --seed 42 --output reports/demo.json
+python -m trading_assistant.v2.cli backtest --csv historico.csv --strategy trend --output reports/historico.json
+python -m trading_assistant.v2.cli walk-forward --bars 600 --output reports/walk-forward.json
+python -m trading_assistant.v2.cli sensitivity --bars 300 --output reports/sensitivity.json
+python -m trading_assistant.v2.cli train --bars 300 --output reports/model.json
+python -m trading_assistant.v2.cli diagnose
+python -m unittest discover -s tests -v
+python -m scripts.smoke_gui
 ```
 
----
+Estratégias: tendência, rompimento e pullback. A análise usa EMA/SMA, RSI, MACD, ATR, VWAP de sessão,
+Bollinger, suportes/resistências, momentum, volume relativo, consolidação e volatilidade.
+O filtro multitemporal é opcional na configuração da estratégia.
+Não há confiança estatística calibrada: o campo fica indisponível, sem porcentagens inventadas.
 
-## Avisos importantes
+## Risco e execução
 
-- **Modo Real** na UI é o modo para plugar execução real (corretora/Profit/API).  
-  Neste repositório, a execução real depende da integração que você escolher (Profit, corretora, API etc.).
-- O **motor é explicável e calibrável**, mas não é “garantia” de lucro.  
-  Use o shadow trading para validar e só depois pense em execução real.
+O tamanho considera valor por ponto, lote, stop, custos, margem simulada, exposição e saldo.
+Não força um contrato quando o orçamento é insuficiente. Limites diário/semanal/mensal, meta,
+quantidade de operações, posições, ativos, estratégias, horário, spread, slippage e cooldown são configuráveis.
+As decisões, fills, posições, cancelamentos e bloqueios são gravados em transações SQLite.
+Entradas são no próximo candle, com latência configurável e liquidez estimada pelo **volume anterior**.
+Quando faltam candles por mais tempo que o limite de idade dos dados, ordens pendentes daquele ativo
+são canceladas antes da próxima abertura; sinais expirados são rejeitados. Stops de posições
+existentes continuam sendo avaliados no candle seguinte, com risco de gap.
+Preenchimento parcial usa IOC: o restante é cancelado. Stops com gaps usam o pior preço de abertura;
+se stop e alvo forem tocados no mesmo candle, considera stop primeiro. Trailing e break-even são opcionais.
 
+## Limites desta entrega
+
+- Rico/Profit: fronteira bloqueada; falta confirmar habilitação, licença, SDK e ambiente autorizado.
+- Sem feed B3 em tempo real, calendário oficial carregado, rolagem automática, leilões ou simulação de fila.
+- Backtest por um ativo; portfólio multativo sincronizado ainda não implementado.
+- Taxas/margens são entradas de simulação, sem tributação ou ajuste diário completo de futuros.
+- ML opcional simples, com validação temporal e baselines; não foi validado para operar mercados.
+- Bibliotecas gráficas extras e empacotamento `.exe` não puderam ser instalados neste ambiente sem DNS.
+- Interface Tk foi exercitada no Windows; o caminho CustomTkinter requer validação com a dependência instalada.
+- Módulos anteriores permanecem para estudo, notícias e compatibilidade. Seu roteador de ordens foi desativado
+  para impedir que contornem o ledger novo. A entrada `python -m trading_assistant` abre a versão nova.
+
+Veja `docs/ARCHITECTURE.md`, `docs/RISK_MANAGEMENT.md`, `docs/INTEGRATIONS.md`,
+`docs/TESTING.md`, `docs/SECURITY.md` e `docs/DELIVERY_REPORT.md`.
