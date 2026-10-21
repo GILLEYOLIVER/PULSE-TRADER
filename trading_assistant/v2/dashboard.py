@@ -6,7 +6,7 @@ from tkinter import ttk,filedialog,messagebox
 from datetime import datetime,timedelta
 from pathlib import Path
 from dataclasses import asdict,fields
-from statistics import mean
+from math import ceil
 try:
     from PIL import Image,ImageDraw,ImageTk
 except ImportError:
@@ -18,6 +18,7 @@ from .ledger import Ledger
 from .strategy import Strategy
 from .backtest import metrics,run_backtest,save_report
 from .chart_raster import antialiased_lines_png
+from .chart_data import available_periods,chart_series,ema_series,period_label
 from .session import local_time
 from .session import SessionCalendar
 from .suggestions_ui import SuggestionsPanel
@@ -55,6 +56,7 @@ class Dashboard:
         self.engine=PaperEngine(self.ledger,self.limits,self.costs,instruments=specs,strategy=Strategy(**config.get("strategy",{})),calendar=calendar)
         self.bars=[];self.feed=[];self.cursor=0;self.running=False;self.timer=None
         self.window=70;self.offset=0;self.dark=True;self._chart_image=None
+        self._chart_after=None;self._chart_quality_after=None;self._chart_interacting=False;self._chart_closed=False
         self.symbol=tk.StringVar(value="WIN");self.strategy=tk.StringVar(value="trend")
         self._period_seconds={"1 min":60,"5 min":300,"15 min":900}
         self.timeframe=tk.StringVar(value="1 min");self.auto=tk.BooleanVar(value=True)
@@ -102,6 +104,7 @@ class Dashboard:
         self.asset_combo=ttk.Combobox(source,textvariable=self.symbol,values=list(self.engine.specs),width=10,state="readonly")
         self.asset_combo.pack(side="left",padx=4)
         self._button(source,"Carregar simulação",self.load_synthetic)
+        self._button(source,"Simulação 1 s",lambda:self.load_synthetic(seconds=1))
         self._button(source,"Importar CSV",self.import_csv)
         playback=ttk.Frame(toolbar);playback.pack(fill="x")
         self._button(playback,"Iniciar replay",self.start,style="Accent.TButton")
@@ -124,7 +127,8 @@ class Dashboard:
         self.period_combo.pack(side="left");self.period_combo.bind("<<ComboboxSelected>>",lambda _:self.change_period())
         self.chart=tk.Canvas(charttab,highlightthickness=0,height=390)
         self.chart.pack(fill="both",expand=True,pady=(8,5))
-        self.chart.bind("<Configure>",lambda _:self.draw())
+        self.chart.bind("<Configure>",lambda _:self.request_draw(interaction=True))
+        self.chart.bind("<Map>",lambda _:self.request_draw())
         self.chart.bind("<MouseWheel>",lambda e:self.zoom(.85 if e.delta>0 else 1.2))
         self.signal_label=ttk.Label(charttab,textvariable=self.signal_text,style="Signal.TLabel",wraplength=1050)
         self.signal_label.pack(fill="x",padx=4,pady=7)
@@ -335,7 +339,11 @@ class Dashboard:
             self.feed=provider.bars();self.symbol.set(self.feed[0].symbol)
         else:
             self.symbol.set(saved.get("symbol","WIN") if saved else "WIN")
-            self.feed=SyntheticProvider(self.symbol.get(),5000).bars()
+            options={}
+            if saved and saved.get('kind')=='synthetic':
+                options['seconds']=saved.get('seconds',60)
+                if saved.get('start'):options['start']=datetime.fromisoformat(saved['start'])
+            self.feed=SyntheticProvider(self.symbol.get(),5000,**options).bars()
         self._resume()
 
     def _resume(self):
@@ -344,14 +352,12 @@ class Dashboard:
         self.bars=self.feed[max(0,self.cursor-1000):self.cursor]
         self.engine.history[self.symbol.get()]=self.bars.copy()
         self._configure_periods()
+        if self.feed:self.timeframe.set(period_label(self.feed[0].seconds))
         self.status.set("PAPER | "+("Fonte: "+self.feed[0].source if self.feed else "Sem dados")+" | Replay local; corretora desconectada")
 
     def _configure_periods(self):
         base=self.feed[0].seconds if self.feed else 60
-        available=[seconds for seconds in (60,300,900) if seconds>=base and seconds%base==0]
-        if base not in available:available.insert(0,base)
-        self._period_seconds={"Diário" if seconds==86400 else f"{seconds//60} min" if seconds%60==0 else f"{seconds} s":seconds
-                              for seconds in available}
+        self._period_seconds=available_periods(base)
         self.period_combo.configure(values=tuple(self._period_seconds))
         if self.timeframe.get() not in self._period_seconds:
             self.timeframe.set(next(iter(self._period_seconds)))
@@ -364,10 +370,18 @@ class Dashboard:
         self.pause();s=self.ledger.read()
         if s["positions"] or any(o["status"]=="NEW" for o in s["orders"].values()): raise ValueError("Pause e encerre posições/cancele ordens antes de trocar a série")
 
-    def load_synthetic(self):
+    def load_synthetic(self,seconds=60):
         self._can_load()
-        self.feed=SyntheticProvider(self.symbol.get(),5000).bars()
-        with self.ledger.transaction() as s:s["feed"]={"kind":"synthetic","symbol":self.symbol.get()}
+        state=self.ledger.read();last=state['last_bars'].get(self.symbol.get())
+        # A new demo follows the previous closed observation; it never revises it.
+        start=datetime.fromisoformat(last) if last else datetime(2026,1,5,12,tzinfo=UTC)
+        start=datetime.fromtimestamp(ceil(start.timestamp()/seconds)*seconds,UTC)
+        self.feed=SyntheticProvider(self.symbol.get(),5000,seconds=seconds,start=start).bars()
+        with self.ledger.transaction() as s:s["feed"]={"kind":"synthetic","symbol":self.symbol.get(),
+                                                    "seconds":seconds,"start":start.isoformat()}
+        self.engine.history[self.symbol.get()]=[]
+        self.engine.last_decision=None
+        self.signal_text.set("Aguardando 35 candles fechados. Confiança estatística: indisponível.")
         self._resume();self.refresh()
 
     def import_csv(self):
@@ -497,37 +511,46 @@ class Dashboard:
         for t in s["trades"][-100:]:self.table.insert("","end",values=("Resultado",t["id"][:10],t["symbol"],t["side"],t["qty"],round(t["exit"],2),t["exit_reason"],round(t["net"],2)))
         self.suggestions.replay_changed()
         self.draw()
-    def zoom(self,factor):self.window=max(15,min(300,int(self.window*factor)));self.draw()
-    def change_period(self):self.offset=0;self.draw()
+    def request_draw(self,*,interaction=False):
+        if self._chart_closed:return
+        if interaction:
+            self._chart_interacting=True
+            if self._chart_quality_after:self.root.after_cancel(self._chart_quality_after)
+            self._chart_quality_after=self.root.after(140,self._finish_chart_interaction)
+        if self._chart_after is None:self._chart_after=self.root.after(16,self._draw_pending)
+    def _draw_pending(self):
+        self._chart_after=None
+        if not self._chart_closed:self.draw()
+    def _finish_chart_interaction(self):
+        self._chart_quality_after=None;self._chart_interacting=False;self.request_draw()
+    def zoom(self,factor):
+        window=max(15,min(300,int(self.window*factor)))
+        if window!=self.window:self.window=window;self.request_draw(interaction=True)
+    def change_period(self):self.offset=0;self.request_draw(interaction=True)
     def pan(self,delta):
-        count=len(aggregate(self.bars,self._selected_seconds())) if self.bars else 0
+        count=len(chart_series(tuple(self.bars),self._selected_seconds())[0]) if self.bars else 0
         self.offset=max(0,min(max(0,count-self.window),self.offset+delta))
-        self.draw()
+        self.request_draw(interaction=True)
     @staticmethod
     def _ema_series(values,period):
-        result=[None]*len(values)
-        if len(values)<period:return result
-        average=mean(values[:period]);result[period-1]=average
-        multiplier=2/(period+1)
-        for index in range(period,len(values)):
-            average+=multiplier*(values[index]-average)
-            result[index]=average
-        return result
+        return ema_series(values,period)
 
     def _brl(self,value):
         return ('R$' if self.limits.currency=='BRL' else self.limits.currency)+' '+f"{value:,.2f}".replace(",","_").replace(".",",").replace("_",".")
 
     def draw(self):
-        if not hasattr(self,"chart"):return
+        if not hasattr(self,"chart") or not self.chart.winfo_ismapped():return
         c=self.chart;c.delete("all");self._chart_image=None
         w=max(c.winfo_width(),280);h=max(c.winfo_height(),210)
         fg="#9cb0c9" if self.dark else "#53677e"
         grid="#2b3b50" if self.dark else "#dce4ee"
         up="#48c5b1" if self.dark else "#118875"
         down="#f47787" if self.dark else "#cc5369"
+        ema9_color="#ffd27b" if self.dark else "#9a6500"
+        ema21_color="#a9a1ff" if self.dark else "#6748b0"
         c.create_text(26,18,anchor="w",fill=fg,text="PAPER  •  HORÁRIO DE BRASÍLIA  •  DADOS SIMULADOS OU CSV",font=("Segoe UI Semibold",10))
         selected=self._selected_seconds()
-        all_rows=aggregate(self.bars,selected) if self.bars else []
+        all_rows,ema9,ema21=chart_series(tuple(self.bars),selected)
         self.offset=min(self.offset,max(0,len(all_rows)-self.window))
         end=max(0,len(all_rows)-self.offset)
         start=max(0,end-self.window)
@@ -545,25 +568,29 @@ class Dashboard:
         candle_width=max(1.6,min(step*.65,13))
         for i in range(5):
             value=lo+(hi-lo)*i/4;yy=y(value)
-            c.create_line(left,yy,right,yy,fill=grid)
+            c.create_line(left,yy,right,yy,fill=grid,tags="chart_grid")
             c.create_text(right+9,yy,text=f"{value:,.2f}",anchor="w",fill=fg,font=("Consolas",9))
-        c.create_line(left,bottom+13,right,bottom+13,fill=grid)
+        c.create_line(left,bottom+13,right,bottom+13,fill=grid,tags="chart_grid")
         c.create_text(left,bottom+25,text="VOLUME",anchor="w",fill=fg,font=("Segoe UI Semibold",8))
         maxvol=max(b.volume for b in rows) or 1
-        closes=[b.close for b in all_rows]
         curves=[]
-        for period,color in ((9,"#ffd27b"),(21,"#a9a1ff")):
-            series=self._ema_series(closes,period)[start:end]
+        for values,color in ((ema9,ema9_color),(ema21,ema21_color)):
+            series=values[start:end]
             points=[(left+(i+.5)*step,y(value)) for i,value in enumerate(series) if value is not None]
             curves.append((points,color))
 
         # Tk Canvas is crisp for labels, but has no antialiasing for diagonal
         # lines. Pillow renders the market layer at 2x and downsamples it.
-        if Image is not None:
+        if Image is not None and not self._chart_interacting:
             factor=2
-            layer=Image.new("RGBA",(w*factor,h*factor),(0,0,0,0))
+            # Opaque uploads avoid Tk's slow full-canvas alpha compositing.
+            layer=Image.new("RGB",(w*factor,h*factor),c.cget("background"))
             pen=ImageDraw.Draw(layer)
             def point(x,y0):return (round(x*factor),round(y0*factor))
+            for i in range(5):
+                yy=y(lo+(hi-lo)*i/4)
+                pen.line((point(left,yy),point(right,yy)),fill=grid,width=factor)
+            pen.line((point(left,bottom+13),point(right,bottom+13)),fill=grid,width=factor)
             for i,b in enumerate(rows):
                 x=left+(i+.5)*step;color=up if b.close>=b.open else down
                 pen.rectangle((*point(x-candle_width/2,volume_base-b.volume/maxvol*volume_height),
@@ -574,7 +601,8 @@ class Dashboard:
             for points,color in curves:
                 if len(points)>1:pen.line([point(x,y0) for x,y0 in points],fill=color,width=round(2.2*factor),joint="curve")
             self._chart_image=ImageTk.PhotoImage(layer.resize((w,h),Image.Resampling.LANCZOS),master=c)
-            c.create_image(0,0,anchor="nw",image=self._chart_image)
+            image_item=c.create_image(0,0,anchor="nw",image=self._chart_image)
+            c.tag_lower(image_item);c.tag_lower("chart_grid")
         else:
             for i,b in enumerate(rows):
                 x=left+(i+.5)*step;color=up if b.close>=b.open else down
@@ -583,13 +611,16 @@ class Dashboard:
                 c.create_line(x,y(b.high),x,y(b.low),fill=color,width=1.3)
                 upper=y(max(b.open,b.close));lower=max(y(min(b.open,b.close)),upper+1)
                 c.create_rectangle(x-candle_width/2,upper,x+candle_width/2,lower,fill=color,outline=color)
-            if any(len(points)>1 for points,_ in curves):
+            if self._chart_interacting:
+                for points,color in curves:
+                    if len(points)>1:c.create_line(*(v for point in points for v in point),fill=color,width=2.2)
+            elif any(len(points)>1 for points,_ in curves):
                 self._chart_image=tk.PhotoImage(data=antialiased_lines_png(w,h,curves),format="png",master=c)
                 c.create_image(0,0,anchor="nw",image=self._chart_image)
 
         for p in self.ledger.read()["positions"].values():
             if p["symbol"]!=rows[-1].symbol:continue
-            for key,label,color in (("entry","ENTRADA",up),("stop","STOP",down),("target","ALVO","#a9a1ff")):
+            for key,label,color in (("entry","ENTRADA",up),("stop","STOP",down),("target","ALVO",ema21_color)):
                 yy=y(p[key])
                 if top<=yy<=bottom:
                     c.create_line(left,yy,right,yy,fill=color,dash=(4,4))
@@ -597,13 +628,20 @@ class Dashboard:
         for i in range(5):
             index=min(len(rows)-1,round(i*(len(rows)-1)/4))
             x=left+(index+.5)*step
-            c.create_text(x,h-11,text=local_time(rows[index].ts).strftime("%d/%m %H:%M"),fill=fg,
+            c.create_text(x,h-11,text=local_time(rows[index].ts).strftime("%H:%M:%S" if selected<60 else "%d/%m %H:%M"),fill=fg,
                           anchor="w" if i==0 else "e" if i==4 else "center",font=("Segoe UI",9))
-        c.create_text(right-10,18,anchor="e",fill="#ffd27b",text="EMA 9",font=("Segoe UI Semibold",9))
-        c.create_text(right-82,18,anchor="e",fill="#a9a1ff",text="EMA 21",font=("Segoe UI Semibold",9))
+        c.create_text(right-10,18,anchor="e",fill=ema9_color,text="EMA 9",font=("Segoe UI Semibold",9))
+        c.create_text(right-82,18,anchor="e",fill=ema21_color,text="EMA 21",font=("Segoe UI Semibold",9))
 
     def close(self):
-        self.pause();self.suggestions.data_center.close();self.jobs.close();self.ledger.close();self.root.destroy()
+        self._chart_closed=True
+        for timer in (self._chart_after,self._chart_quality_after):
+            if timer:self.root.after_cancel(timer)
+        self._chart_after=None;self._chart_quality_after=None
+        self.pause();self.suggestions.data_center.close();self.jobs.close()
+        # Theme/resize timers also belong to this closing Tk interpreter.
+        for timer in self.root.tk.call('after','info'):self.root.after_cancel(timer)
+        self.ledger.close();self.root.destroy()
     def run(self):self.root.mainloop()
 
 def launch_dashboard():Dashboard().run()

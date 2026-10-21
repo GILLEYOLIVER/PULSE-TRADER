@@ -136,8 +136,10 @@ Para usar o executável já construído nesta cópia, abra **iniciar-portatil.cm
     A cópia inclui os bancos e arquivos locais; a restauração verifica hashes e integridade dos bancos.
 
 O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
-períodos de **1, 5 e 15 minutos** quando os dados de origem permitem, e temas claro/escuro.
+períodos de **1, 5, 10, 15 e 30 segundos**, além de **1, 5 e 15 minutos**, quando os dados de origem permitem, e temas claro/escuro.
 Ao importar candles de 5 minutos, por exemplo, o período de 1 minuto não é oferecido.
+Use **Simulação 1 s** para experimentar os períodos curtos, ou consulte a última hora de
+cripto na Binance em Fontes e atualização. [Zoom e gráficos em segundos](docs/CHART_SECONDS.md).
 O eixo do tempo exibe o horário de Brasília. Dados sintéticos seguem uma sequência
 contínua e não representam pregões, feriados ou horários oficiais da B3.
 Indicadores adicionais aparecem nos sinais e no motor.

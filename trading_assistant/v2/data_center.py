@@ -9,7 +9,11 @@ from .company_context import fetch_company_context
 from .market_data import fetch_market, read_profit_csv
 
 
-PERIODS={'1 min':60,'5 min':300,'15 min':900,'60 min':3600,'Diário':86400}
+PERIODS={'1 s':1,'5 s':5,'10 s':10,'15 s':15,'30 s':30,'1 min':60,'5 min':300,'15 min':900,'60 min':3600,'Diário':86400}
+
+def provider_periods(provider):
+    supported={60,900,3600,86400} if provider=='mercado_bitcoin' else set(PERIODS.values()) if provider=='binance' else {60,300,900,3600,86400}
+    return tuple(label for label,seconds in PERIODS.items() if seconds in supported)
 
 
 class DataCenter:
@@ -43,6 +47,7 @@ class DataCenter:
         ttk.Label(window,padding=16,wraplength=680,text=(
             'Dados públicos de ações: PETR4, VALE3, ITUB4 e MGLU3 na brapi. Outros ativos dependem do plano e da variável BRAPI_TOKEN. '
             'Cripto: BTC/ETH em BRL no Mercado Bitcoin; BTCUSDT/ETHUSDT em USDT na Binance, com atividade do candle. Cotações podem ter atraso. '
+            'Segundos na Binance: última hora, formada a partir de candles de 1 s. '
             'WIN/WDO: use um histórico autorizado do Profit. Nenhum acesso a conta ou envio de ordens.')).pack(fill='x')
         form=ttk.Frame(window,padding=16);form.pack(fill='x')
         for row,(label,var,choices) in enumerate((('Provedor',provider,('brapi','mercado_bitcoin','binance')),
@@ -50,6 +55,12 @@ class DataCenter:
             ttk.Label(form,text=label).grid(row=row,column=0,sticky='w',pady=6)
             widget=ttk.Combobox(form,textvariable=var,values=choices,state='readonly') if choices else ttk.Entry(form,textvariable=var)
             widget.grid(row=row,column=1,sticky='ew',padx=12,pady=6)
+            if var is provider:provider_widget=widget
+            if var is period:period_widget=widget
+        def update_periods(_=None):
+            values=provider_periods(provider.get());period_widget.configure(values=values)
+            if period.get() not in values:period.set('1 min')
+        provider_widget.bind('<<ComboboxSelected>>',update_periods);update_periods()
         form.columnconfigure(1,weight=1)
         ttk.Checkbutton(window,text='Consultar fundamentos, proventos e comunicados CVM para ações',variable=context).pack(anchor='w',padx=16)
         ttk.Checkbutton(window,text='Atualizar automaticamente a cada 60 segundos (somente leitura)',variable=auto).pack(anchor='w',padx=16,pady=8)
@@ -75,7 +86,7 @@ class DataCenter:
         self.dashboard.status.set('Consultando dados públicos em segundo plano…')
         def work():
             market=fetch_market(settings['symbol'],PERIODS[settings['period']],provider=settings['provider'],
-                                window='2y' if settings['period']=='Diário' else '5d')
+                                window='1h' if PERIODS[settings['period']]<60 else '2y' if settings['period']=='Diário' else '5d')
             market.save(self.dashboard.data_dir/'downloads')
             context=None
             path=self.dashboard.data_dir/'company-context'/(settings['symbol']+'.json')
