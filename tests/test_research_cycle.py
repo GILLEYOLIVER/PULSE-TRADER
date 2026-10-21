@@ -14,7 +14,7 @@ from trading_assistant.v2.data import SyntheticProvider
 from trading_assistant.v2.learning import HistoricalRotation
 from trading_assistant.v2.models import UTC,ExecutionSettings,Limits
 from trading_assistant.v2.research import (ChampionStore,aggregate_metrics,candidate_bank,development_result,
-    goal_evidence,plan_forward,promotion_decision,select_development,wilson)
+    goal_evidence,plan_forward,promotion_decision,select_development,wilson,warmup_start,development_slices)
 from trading_assistant.v2.strategy import Strategy
 from trading_assistant.v2.execution import PaperEngine
 from trading_assistant.v2.ledger import Ledger
@@ -61,6 +61,8 @@ class MetricsCase(unittest.TestCase):
         with self.assertRaises(ValueError):goal_evidence([rows[0],confirmation(1,version='b'*64)])
         rows[2]['stress_net']=-1
         self.assertFalse(goal_evidence(rows)['observed_goal_reached'])
+        rows[2]['stress_net']=25.;rows[2]['qualified_for_goal']=False
+        self.assertFalse(goal_evidence(rows)['observed_goal_reached'])
 
     def test_development_rejects_one_bad_fold_and_requires_operation_counts(self):
         p=asdict(Strategy());good=development_result(p,[report() for _ in range(3)])
@@ -80,6 +82,35 @@ class MetricsCase(unittest.TestCase):
 
 
 class VersionsAndTimeCase(unittest.TestCase):
+    def test_common_development_folds_cannot_precede_the_reference_model(self):
+        bars=SyntheticProvider(count=500).bars()
+        cutoff=bars[350].ts.isoformat()
+        folds=development_slices(bars,cutoff)
+        self.assertEqual(folds,[(350,400),(400,450),(450,500)])
+        self.assertEqual(development_slices(bars,bars[450].ts.isoformat()),[])
+
+    def test_batched_learning_keeps_the_hash_chain_and_refuses_partial_invalid_input(self):
+        from trading_assistant.v2.learning import LearningMemory
+        with tempfile.TemporaryDirectory() as directory:
+            memory=LearningMemory(directory)
+            rows=memory.append_batch('VALIDATION',[{'score':1},{'score':2}])
+            self.assertEqual(rows[1]['previous'],rows[0]['sha256'])
+            before=memory.training_path.read_bytes()
+            with self.assertRaises(ValueError):memory.append_batch('VALIDATION',[{'score':3},{'score':float('nan')}])
+            self.assertEqual(memory.training_path.read_bytes(),before)
+            self.assertEqual(len(memory.training_records()),2)
+            memory.append_batch('BLIND_TEST',[{'score':999}])
+            self.assertEqual(len(memory.training_records()),2)
+            self.assertEqual(len(memory.evaluations()),1)
+
+    def test_warmup_duration_scales_with_timeframe_and_has_no_test_bars(self):
+        for seconds in (300,3600,86400):
+            first=datetime.fromisoformat(warmup_start(START,seconds)).replace(tzinfo=UTC)
+            self.assertGreaterEqual((START-first).total_seconds()/seconds,250)
+            self.assertLess(first,START)
+        self.assertGreaterEqual((START-datetime.fromisoformat(warmup_start(START,3600)).replace(tzinfo=UTC)).days,11)
+        with self.assertRaises(ValueError):warmup_start(START,True)
+
     def test_child_interpreter_imports_frozen_package_and_tools(self):
         with tempfile.TemporaryDirectory() as directory:
             store=ChampionStore(directory)

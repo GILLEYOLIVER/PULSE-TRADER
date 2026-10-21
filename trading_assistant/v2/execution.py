@@ -39,8 +39,12 @@ class PaperEngine:
         return Decision(o["symbol"],o["side"],o["price"],o["stop"],o["target"],datetime.fromisoformat(o["signal_ts"]),
             datetime.fromisoformat(o["expires"]),o["strategy"],o["reason"])
 
+    @staticmethod
+    def decision_key(d):
+        return hashlib.sha256(f"{d.symbol}|{d.strategy}|{aware(d.ts).isoformat()}|{d.side}".encode()).hexdigest()
+
     def submit(self,d:Decision,key=None,requested=None):
-        key=key or hashlib.sha256(f"{d.symbol}|{d.strategy}|{aware(d.ts).isoformat()}|{d.side}".encode()).hexdigest()
+        key=key or self.decision_key(d)
         with self.ledger.transaction() as s:
             return self._submit(s,d,key,requested)
 
@@ -228,12 +232,14 @@ class PaperEngine:
             s["loss_streak"]=0
         self.ledger.audit(ts,"position_closed",trade)
 
-    def on_bar(self,b:Bar,automatic=True):
+    def on_bar(self,b:Bar,automatic=True,*,evaluate_signal=True):
         """Process one completed candle, preserving the single-symbol API."""
-        return self.on_bars([b],automatic)[0]
+        return self.on_bars([b],automatic,evaluate_signal=evaluate_signal)[0]
 
-    def on_bars(self,bars,automatic=True):
+    def on_bars(self,bars,automatic=True,*,evaluate_signal=True):
         """Process synchronized candles; entries see every open, never a current close."""
+        if type(evaluate_signal) is not bool or automatic and not evaluate_signal:
+            raise ValueError('History-only context cannot execute automatic entries')
         bars=sorted(list(bars),key=lambda b:b.symbol)
         if not bars: raise ValueError("No candles")
         if len({b.symbol for b in bars})!=len(bars) or len({(b.ts,b.seconds) for b in bars})!=1:
@@ -333,7 +339,7 @@ class PaperEngine:
             history=self.history.setdefault(b.symbol,[])
             history.append(b)
             del history[:-1000]
-            decisions.append(self.strategy.evaluate(history))
+            decisions.append(self.strategy.evaluate(history) if evaluate_signal else None)
         self.last_decision=decisions[-1]
         if automatic:
             self.process_plans()

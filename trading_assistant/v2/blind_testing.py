@@ -34,7 +34,7 @@ def blind_replay(stream,*,strategy,limits,costs,instruments,trace_path=None,warm
     engine=PaperEngine(ledger,limits,costs,instruments,strategy)
     prior=None;warmup_count=0
     for item in warmup:
-        engine.on_bar(item,automatic=False);prior=item;warmup_count+=1
+        engine.on_bar(item,automatic=False,evaluate_signal=False);prior=item;warmup_count+=1
     trace=[];previous_orders={};checked_fills=set();known_trades=0;equity=[];bars_seen=0;realized=0.
     checks={'closed_information_only':True,'unique_fills':True,'fees_reconcile':True,
         'initial_risk_within_budget':True,'instrument_permissions':True}
