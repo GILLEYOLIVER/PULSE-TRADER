@@ -18,6 +18,14 @@ SETUPS = {"CONFIRMED": "Sinal técnico", "CONDITIONAL": "Aguardar gatilho", "WAI
 STRATEGIES = {"trend": "Tendência", "breakout": "Rompimento", "pullback": "Retomada"}
 
 
+def history_digest(bars):
+    digest = hashlib.sha256()
+    for b in bars:
+        digest.update(json.dumps([b.symbol, aware(b.ts).isoformat(), b.open, b.high, b.low,
+                                  b.close, b.volume, b.source, b.seconds], separators=(",", ":")).encode())
+    return digest.hexdigest()
+
+
 def matches_profile(seconds, profile):
     if profile not in PROFILES:
         raise ValueError("Perfil desconhecido")
@@ -66,6 +74,7 @@ class Suggestion:
     stop: float | None = None
     target: float | None = None
     data_sha256: str = ""
+    history_sha256: str = ""
 
     def to_dict(self):
         record = asdict(self)
@@ -90,7 +99,7 @@ def analyze_series(bars, profile, *, as_of=None, parameters=None, instruments=No
                                   b.close, b.volume, b.source, b.seconds], separators=(",", ":")).encode())
     base = dict(symbol=first.symbol, profile=profile, source=first.source, seconds=first.seconds,
                 closed_at=aware(closed[-1].ts) + timedelta(seconds=first.seconds) if closed else None,
-                candles=len(closed), data_sha256=digest.hexdigest())
+                candles=len(closed), data_sha256=digest.hexdigest(), history_sha256=history_digest(closed[-1000:]))
     if len(closed) < 35:
         return Suggestion(**base, trend="UNKNOWN", setup="INSUFFICIENT",
                           reason=f"{len(closed)} candles encerrados; são necessários pelo menos 35.",
@@ -151,14 +160,17 @@ def analyze_series(bars, profile, *, as_of=None, parameters=None, instruments=No
                       strategy=strategy, side=side, entry=entry, stop=stop, target=target)
 
 
-def save_plan(ledger, suggestion, *, saved_at, limits, costs, parameters):
+def save_plan(ledger, suggestion, *, saved_at, limits, costs, parameters, context=None, context_ack=False, instruments=None):
     """Save an analysis proposal only. Entry orders always remain in PaperEngine.submit."""
     if suggestion.entry is None:
         raise ValueError("Este cenário ainda não tem um plano de entrada")
     limits.validate()
     costs.validate()
+    spec=(instruments if instruments is not None else INSTRUMENTS).get(suggestion.symbol)
     record = {"analysis": suggestion.to_dict(), "limits": asdict(limits), "execution": asdict(costs),
+              "instrument":asdict(spec) if spec else None,
               "parameters": asdict(parameters), "state": "PROPOSAL_ONLY",
+              "context": context, "context_ack": bool(context_ack),
               "risk_budget": limits.capital * limits.risk_fraction,
               "risk_approved": False, "quantity": None}
     key = hashlib.sha256(json.dumps(record, sort_keys=True, allow_nan=False).encode()).hexdigest()

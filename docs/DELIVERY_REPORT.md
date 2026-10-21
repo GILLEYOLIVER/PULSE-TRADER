@@ -2,6 +2,10 @@
 
 Data: 20/10/2026. Execução financeira: exclusivamente PAPER.
 
+Atualização 2.1: [execução dos seis passos e resultados reais](UPGRADE_6_STEPS.md).
+Inclui fontes públicas, conversor do Profit, contexto financeiro/CVM, entrada PAPER vinculada aos planos,
+formulários completos, tarefas em segundo plano, backup/restauração e construção portátil Windows.
+
 ## Implementado
 
 Domínio modular em `trading_assistant/v2`: dados CSV/sintéticos, validação OHLCV, cache SQLite,
@@ -16,8 +20,8 @@ não calibra confiança nem pode ignorar o risco ou ativar execução.
 
 Aba Sugestões com vários ativos, perfis intradiário/diário, indicação visual de alta/baixa/lateralização,
 motivo, entrada condicional, stop e alvo. Catálogo CSV persistente, corte por candle encerrado,
-exportação e propostas idempotentes em SQLite. Os planos não criam ordens e não têm risco aprovado.
-Análise técnica por regras; não apresenta scores como probabilidades nem incorpora balanços/notícias.
+exportação e propostas idempotentes em SQLite. Guardar uma proposta não cria ordem; armar exige
+histórico compatível e risco central. Contexto de fundamentos/proventos/comunicados acrescenta alertas.
 
 Dashboard desktop com Tk/CustomTkinter opcional, candles, volume, EMA9/21, zoom, navegação,
 timeframes, temas, sinais, resultados, controles simples de risco/estratégia e JSON avançado.
@@ -37,7 +41,7 @@ A UI anterior e módulos de notícias/análise foram preservados, sem execução
 
 ## Verificação efetiva
 
-- 61 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
+- 78 testes unitários/integração aprovados, sem skips, incluindo injeção de falha e rollback.
 - Compilação de todos os módulos aprovada.
 - Smoke da interface Windows: formulário de risco, 80 candles, renderização, zoom, pan, tema, timeframe e emergência aprovados.
 - Smoke repetido no ambiente virtual com CustomTkinter 6.0.0 e Pillow 13.0.0, aprovado.
@@ -54,6 +58,8 @@ A UI anterior e módulos de notícias/análise foram preservados, sem execução
 
 Não há validação de rentabilidade. O modelo sintético de exemplo ficou abaixo de baselines no holdout;
 nenhum modelo foi promovido a execução. Relatórios locais são exemplos de mecânica, não recomendações.
+Foram executados quatro estudos com histórico público real de PETR4/VALE3 nos perfis minuto e diário;
+nenhum passou pelo filtro de evidência/calibração. Os resultados e premissas constam no guia 2.1.
 
 ## Pendências e limites conhecidos
 
@@ -67,8 +73,9 @@ leilões/haltes, fila real, ajuste diário completo de futuros ou tributação. 
 As proteções são locais ao replay e param se o programa fechar. Gaps podem superar o risco planejado.
 
 CustomTkinter e Pillow foram instalados apenas no ambiente virtual local; o núcleo continua independente deles.
-Empacotamento `.exe` foi avaliado, mas ainda não construído ou homologado.
-Backtest extenso pode bloquear a janela; use CLI para séries longas.
+O script de empacotamento constrói e testa executável/ZIP por commit, com SQLite incluído.
+Homologação em outro computador e assinatura de código permanecem externas.
+Backtests, treino, downloads e validação agora usam tarefas em segundo plano.
 
 ## Instalar/executar
 

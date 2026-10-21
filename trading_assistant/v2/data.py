@@ -72,6 +72,9 @@ def export_csv(bars: Iterable[Bar],path: str|Path):
 
 def aggregate(bars: list[Bar],seconds: int) -> list[Bar]:
     """Return only complete UTC-aligned buckets. Missing base bars => omit bucket."""
+    if bars and all(b.seconds==seconds for b in bars):
+        # A provider's daily/session opening need not be midnight UTC.
+        return sorted(bars,key=lambda b:(b.ts,b.symbol))
     groups={}
     for b in bars:
         if seconds < b.seconds or seconds % b.seconds: raise ValueError("Timeframe must be a multiple of base")

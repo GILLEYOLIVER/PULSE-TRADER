@@ -40,13 +40,14 @@ seu avanço. **Exemplo simulado** mostra séries sintéticas identificadas como 
 **Dados salvos** reabre o catálogo SQLite local (`suggestions.sqlite`) após reiniciar o aplicativo.
 **Exportar sugestões** salva o perfil visível, os motivos, preços, datas, origem e hash dos dados.
 
-O botão **Onde obter dados** abre instruções para:
+O painel **Fontes e atualização** consulta dados públicos e oferece conversão do Profit:
 
 - Exportar históricos do Profit conforme a licença disponível:
   [guia oficial Nelogica](https://ajuda.nelogica.com.br/hc/pt-br/articles/360044287672-Como-exportar-dados-hist%C3%B3ricos-de-ativos-para-o-Excel).
-  O arquivo bruto precisa ser convertido para o CSV padrão do PULSE.
+  O conversor nativo pergunta período e convenção do horário, e exige Volume Quantidade.
 - Consultar dados financeiros de empresas na
-  [CVM](https://dados.cvm.gov.br/dataset/cia_aberta-doc-itr). Esses dados ainda não entram no cálculo desta aba.
+  [CVM](https://dados.cvm.gov.br/dataset/cia_aberta-doc-ipe). Fundamentos, proventos e comunicados aparecem
+  como contexto da companhia e podem exigir revisão antes de armar uma entrada.
 
 ## Planos e execução
 
@@ -56,11 +57,16 @@ repetir a mesma proposta não cria cópias nem ordens. `risk_approved=false` e `
 indicam que o plano ainda não passou pelo dimensionamento de uma entrada.
 O orçamento exibido é capital configurado × fração de risco; não é promessa de perda máxima.
 
-A aba não envia ordens. Entradas manuais/automáticas continuam no motor PAPER, que valida
-o risco em cada envio e preenchimento. Uma venda proposta não estabelece disponibilidade de aluguel
-ou permissão para venda descoberta. O perfil de dias/semanas não inclui balanços, notícias, dividendos,
-tributação, ajuste diário de futuros ou proteção hospedada na corretora.
+**Levar ao replay** prepara o histórico em lotes sem entradas. **Armar entrada PAPER** confere o hash
+e a data exata do histórico, configurações, especificação, revisão de alertas e risco. Um sinal formado
+gera ordem pendente; um gatilho condicional aguarda confirmação em novo candle encerrado e volume.
+O preenchimento só ocorre em candle posterior e passa novamente pelo risco central. Os planos expiram
+em três candles e podem ser cancelados. Alterações de premissas invalidam planos armados.
+Uma venda proposta não estabelece disponibilidade de aluguel ou permissão para venda descoberta.
+O P&L permanece de preço: sem proventos em caixa, tributação, aluguel ou ajuste diário completo de futuros.
 
-Esta entrega usa regras técnicas, sem probabilidade calibrada ou previsão comprovada de valorização.
+**Validar histórico** executa seleção temporal, teste final e custos em segundo plano. Probabilidades
+só aparecem quando o modelo passa pelos critérios de calibração fora da amostra e não apresenta drift.
+Nenhum dos quatro estudos reais iniciais passou pelo filtro de evidência ou calibração.
 Um setup marcado como sinal significa apenas que suas regras foram atendidas no último candle encerrado.
 Os testes verificam a mecânica; não validam rentabilidade.

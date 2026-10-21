@@ -13,7 +13,8 @@ se abrir, validar ou gravar o estado falhar, o erro se propaga e novas operaçõ
 IDs de ordens são persistentes. Dados inválidos, sem timezone, revisados ou fora de ordem são rejeitados.
 Não há desserialização pickle ou avaliação de código em configuração JSON/modelos.
 
-Copie o banco com o programa fechado ou use sqlite backup. Restaurar uma cópia antiga também restaura
+A UI usa SQLite online backup, hashes e verificação de integridade, com restauração em diretório vazio.
+Nenhum servidor ou instalação de SQLite é necessário. Restaurar uma cópia antiga também restaura
 seu relógio e limites de simulação; não usar esta ferramenta para contabilizar uma conta real.
 Não apagar runtime para esconder perdas. Estados de emergência continuam após reiniciar.
 O bloqueio depende do relógio de replay, não de cotações reais ou proteções hospedadas na corretora.
@@ -23,3 +24,8 @@ Um calendário incompleto pode admitir entradas em períodos em que a B3 não ne
 Dependências opcionais devem ser revisadas e travadas antes de distribuição externa. CustomTkinter e Pillow
 foram instalados para o teste local; uma auditoria de vulnerabilidades e assinatura do pacote ainda faltam.
 O núcleo novo usa stdlib.
+
+Consultas de mercado são de leitura em domínios de provedores documentados. `BRAPI_TOKEN` é lido
+do ambiente e não aparece nos arquivos de configuração, banco ou pacote. ZIPs CVM são lidos em memória,
+sem extração de caminhos. Backups restaurados têm caminhos e hashes verificados antes da escrita.
+Snapshots atuais de fundamentos/modelos ficam fora de replays anteriores à sua disponibilidade.

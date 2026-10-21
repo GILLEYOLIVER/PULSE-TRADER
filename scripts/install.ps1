@@ -12,7 +12,7 @@ if ($Full -or $Ui) {
     & $python -m ensurepip --upgrade
     if ($LASTEXITCODE -ne 0) { throw 'Cannot bootstrap pip. Core/Tk mode requires no packages.' }
     if ($Full) { & $python -m pip install -r requirements.txt }
-    else { & $python -m pip install 'customtkinter>=5.2' 'Pillow>=10' }
+    else { & $python -m pip install 'customtkinter>=5.2' 'Pillow>=10' 'tzdata>=2026.1' }
     if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed. Offline core still runs with Tkinter.' }
 }
 & $python -m trading_assistant.v2.cli diagnose

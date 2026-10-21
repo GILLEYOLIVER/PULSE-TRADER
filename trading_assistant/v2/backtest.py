@@ -23,7 +23,7 @@ def metrics(trades,capital,equity=None):
         "net":sum(results),"fees":sum(t["fees"] for t in trades),"max_drawdown":dd,
         "return_fraction":sum(results)/capital,"profit_factor_note":"undefined without losing trades" if not losses else ""}
 
-def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None):
+def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None):
     if not bars: raise ValueError("No data")
     previous={};sources={};timeframes={}
     for b in bars:
@@ -39,7 +39,7 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None):
         groups[-1].append(b)
     if len(symbols)>1 and any({b.symbol for b in group}!=symbols or len({b.seconds for b in group})!=1 for group in groups):
         raise ValueError("Portfolio history requires every symbol at each synchronized interval")
-    ledger=Ledger();engine=PaperEngine(ledger,limits,costs,strategy=strategy,calendar=calendar)
+    ledger=Ledger();engine=PaperEngine(ledger,limits,costs,instruments=instruments,strategy=strategy,calendar=calendar)
     equity=[]
     digest=hashlib.sha256()
     for group in groups:
