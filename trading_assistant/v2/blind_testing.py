@@ -10,6 +10,7 @@ from .backtest import metrics
 from .execution import PaperEngine
 from .ledger import SimulationLedger
 from .learning import digest
+from .error_review import review_closed_trades
 
 
 def block_bootstrap(values,*,samples=500,block=5,seed=317):
@@ -93,6 +94,8 @@ def blind_replay(stream,*,strategy,limits,costs,instruments,trace_path=None,warm
         'order_count':len(state['orders']),'rejected_orders':sum(o['status']=='REJECTED' for o in state['orders'].values()),
         'reason_counts':{},'execution_enabled':False}
     result['uncertainty']=block_bootstrap([trade['net'] for trade in state['trades']]) if bootstrap else {'calculated':False}
+    result['outcome_review']=review_closed_trades(state['trades'],costs=costs,
+        risk_budget=limits.capital*limits.risk_fraction)
     for order in state['orders'].values():
         if order['status']=='REJECTED':
             reason=order['message'];result['reason_counts'][reason]=result['reason_counts'].get(reason,0)+1

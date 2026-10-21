@@ -257,6 +257,7 @@ def collect_trade_samples(bars,strategy,limits,costs,instruments,*,feature_set=L
     samples=result['trade_training_samples']
     diagnostics={'closed_trades':result['metrics']['trades'],'natural_labels':len(samples),
         'censored_forced_exits':sum(t['exit_reason']=='FLATTEN' for t in result['trades']),
-        'teacher_metrics':result['metrics'],'teacher_parameters':asdict(strategy)}
+        'teacher_metrics':result['metrics'],'teacher_parameters':asdict(strategy),
+        'outcome_review':result['outcome_review']}
     if feature_set!=LEGACY_TRADE_SET:diagnostics['feature_set']=feature_set
     return samples,diagnostics

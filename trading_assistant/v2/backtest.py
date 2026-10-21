@@ -87,6 +87,9 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
         "limitations":["Synthetic results are not market evidence","OHLC cannot determine intrabar path; stop first",
             "Fees and margins are simulation inputs","No queue priority, auction, exchange halts, tax or official rollover modelling"]}
     if collect_trade_features:
+        from .error_review import review_closed_trades
+        result['outcome_review']=review_closed_trades(state['trades'],costs=engine.costs,
+            risk_budget=engine.limits.capital*engine.limits.risk_fraction)
         result['trade_training_samples']=[{**entry_context[t['id']],'label':int(t['net']>0),
             'available_at':t['closed_at'],'net':t['net'],'trade_id':t['id'],
             'initial_stop_cash':engine.costs.stop_loss(t['entry'],t['initial_stop'],t['side'],

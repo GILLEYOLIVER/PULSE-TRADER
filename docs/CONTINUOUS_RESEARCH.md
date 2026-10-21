@@ -7,6 +7,11 @@ Disponibilidade do recurso não representa vantagem comprovada nem adoção na i
 O ensaio conhecido piorou os resultados: o padrão da pesquisa permanece no esquema anterior de 18;
 o novo exige escolha explícita antes do lote, conforme o protocolo.
 
+A [revisão de erros e acertos](ERROR_REVIEW_PROTOCOL.md) registra custos, tamanho dos ganhos e
+perdas, saídas e gaps após cada replay. Os blocos de desenvolvimento podem priorizar hipóteses
+predefinidas dentro da grade do próximo lote, congelada antes dos dados. O externo continua
+somente como confirmação/rejeição, com as mesmas exigências para promover uma versão.
+
 ## Missão e medida
 
 Buscar mais de 90% de operações encerradas com resultado líquido positivo, após os custos declarados. A porcentagem refere-se a operações, não a candles previstos ou testes de software. A meta pode não ser alcançável; não será declarada sem resultados. Não há execução real.

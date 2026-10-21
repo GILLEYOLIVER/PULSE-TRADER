@@ -83,13 +83,18 @@ def aggregate_metrics(reports):
 
 
 def development_result(parameters,reports):
+    from .error_review import development_priorities
     combined=aggregate_metrics(reports);metrics=[r['metrics'] for r in reports]
     eligible=(len(metrics)>=3 and combined['trades']>=30
         and all(r['trades']>=5 and r['net']>0 for r in metrics)
         and combined['max_window_drawdown']<=10000 and all(r['passed'] for r in reports))
-    return {'parameters':parameters,'folds':metrics,'aggregate':combined,'eligible':eligible,
+    value={'parameters':parameters,'folds':metrics,'aggregate':combined,'eligible':eligible,
         'selection_key':[combined['wilson_95_descriptive'][0],
             min((r['expectancy'] for r in metrics),default=0.),combined['net']-.5*combined['max_window_drawdown']]}
+    if any('outcome_review' in r for r in reports):
+        value['error_review']={'phase':'DEVELOPMENT_ONLY','folds':[r.get('outcome_review') for r in reports],
+            'next_experiment_priorities':development_priorities(reports)}
+    return value
 
 
 def select_development(results,reference):
@@ -135,7 +140,7 @@ def goal_evidence(records):
         'meaning':'Observed closed-operation results only; no guaranteed future accuracy or multiple-testing-adjusted inference'}
 
 
-def candidate_bank(cycle_index,reference,limit=30,*,allow_multi_timeframe=False):
+def candidate_bank(cycle_index,reference,limit=30,*,allow_multi_timeframe=False,development_priorities=()):
     """Rotate an a-priori bounded grid; external outcomes do not set thresholds."""
     methods=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
     filters=({},
@@ -146,8 +151,17 @@ def candidate_bank(cycle_index,reference,limit=30,*,allow_multi_timeframe=False)
         for multi in ((False,True) if allow_multi_timeframe else (False,))]
     bank=[bank[(i*37)%len(bank)] for i in range(len(bank))]
     offset=(cycle_index*limit)%len(bank);rotated=bank[offset:]+bank[:offset]
+    prioritized=[]
+    # Feedback can only schedule fixed grid members in a later batch, before data.
+    base={k:v for k,v in reference.items() if k not in ('trade_filter','trade_score_threshold')}
+    for hypothesis in development_priorities:
+        if hypothesis=='REWARD_COST_BALANCE':
+            prioritized += [asdict(Strategy(**{**base,'reward_r':reward})) for reward in (1.25,2.)]
+        elif hypothesis=='ENTRY_SELECTIVITY':
+            prioritized.append(asdict(Strategy(**{**base,**filters[1]})))
+        else:raise ValueError('Undeclared development experiment priority')
     result=[];seen=set()
-    for parameters in [reference,asdict(Strategy()),*rotated]:
+    for parameters in [reference,asdict(Strategy()),*prioritized,*rotated]:
         key=digest(parameters)
         if key not in seen:result.append(parameters);seen.add(key)
         if len(result)>=limit:break
