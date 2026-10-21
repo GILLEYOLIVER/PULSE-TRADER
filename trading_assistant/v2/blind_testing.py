@@ -60,9 +60,7 @@ def blind_replay(stream,*,strategy,limits,costs,instruments,trace_path=None,warm
                 checked_fills.add(fill)
                 spec=instruments[order['symbol']]
                 entry=order['filled_price'];qty=order['filled_qty']
-                loss=qty*(abs(entry-order['stop'])*spec.point_value+costs.fee(entry,spec.point_value)
-                    +costs.fee(order['stop'],spec.point_value)
-                    +(costs.slippage_ticks+costs.spread_ticks/2)*spec.tick*spec.point_value)
+                loss=costs.stop_loss(entry,order['stop'],order['side'],spec.point_value,spec.tick,qty)
                 checks['initial_risk_within_budget'] &= loss<=limits.capital*limits.risk_fraction+1e-7
                 checks['instrument_permissions'] &= (order['side']!='SELL' or spec.allow_short) and spec.currency==limits.currency
         new=state['trades'][known_trades:];known_trades=len(state['trades'])

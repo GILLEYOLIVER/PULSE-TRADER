@@ -34,6 +34,7 @@ class PaperEngine:
             if previous!=config and (s["positions"] or any(o["status"]=="NEW" for o in s["orders"].values())):
                 raise ValueError("Open exposure requires identical saved configuration")
             s["config"]=config
+            self._refresh_reservations(s)
 
     def _decision(self,o):
         return Decision(o["symbol"],o["side"],o["price"],o["stop"],o["target"],datetime.fromisoformat(o["signal_ts"]),
@@ -56,25 +57,45 @@ class PaperEngine:
                 d.symbol,d.side,d.price,d.stop,d.target,d.ts.isoformat(),d.expires.isoformat(),d.strategy,requested):
                 raise ValueError("Idempotency key reused for different order")
             return dict(old)
+        self._refresh_reservations(s)
         spec=self.specs.get(d.symbol)
         qty,reason=self.risk.assess(s,d,spec,d.ts,requested=requested) if spec else (0,"Unknown instrument")
         order={"id":key,"symbol":d.symbol,"side":d.side,"price":d.price,"stop":d.stop,"target":d.target,
             "signal_ts":d.ts.isoformat(),"expires":d.expires.isoformat(),"created_at":d.ts.isoformat(),
             "regime":"volatile" if d.indicators.get("volatility_ratio",0)>2 else "trend" if d.indicators.get("trend_strength",0)>.5 else "range","strategy":d.strategy,"reason":d.reason,"source":s["last_sources"].get(d.symbol),"qty":qty,"filled_qty":0,"status":"NEW" if qty else "REJECTED",
             "message":reason,"requested_qty":requested,"bars_waited":0,"point_value":spec.point_value if spec else 0.,
-            "margin":spec.margin if spec else 0.,"reserved_risk":0.}
+            "margin":spec.margin if spec else 0.,"reserved_risk":0.,'reserved_exposure':0.}
         if qty:
-            per_unit=abs(d.price-d.stop)*spec.point_value+self.costs.fee(d.price,spec.point_value)+self.costs.fee(d.stop,spec.point_value)+2*(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick*spec.point_value
-            order["reserved_risk"]=qty*per_unit
+            entry=self.costs.entry_price(d.price,d.side,spec.tick)
+            order['reserved_risk']=self.costs.stop_loss(entry,d.stop,d.side,spec.point_value,spec.tick,qty)
+            order['reserved_exposure']=entry*qty*spec.point_value
         s["orders"][key]=order
         self.ledger.audit(d.ts,"order_"+order["status"].lower(),{"id":key,"message":reason,"quantity":qty})
         return dict(order)
+
+    def _refresh_reservations(self,s):
+        """Reprice pending legacy orders with the same model used at execution."""
+        for order in s['orders'].values():
+            if order['status']!='NEW':continue
+            spec=self.specs.get(order['symbol'])
+            try:
+                if spec is None:raise ValueError('Unknown pending instrument')
+                entry=self.costs.entry_price(order['price'],order['side'],spec.tick)
+                direction=1 if order['side']=='BUY' else -1
+                if (entry-order['stop'])*direction<=0 or (order['target']-entry)*direction<=0:
+                    raise ValueError('Pending stop or target invalid after adverse entry')
+                order['reserved_risk']=self.costs.stop_loss(entry,order['stop'],order['side'],spec.point_value,spec.tick,order['qty'])
+                order['reserved_exposure']=entry*order['qty']*spec.point_value
+            except ValueError as error:
+                order.update(status='REJECTED',message=str(error),reserved_risk=0.,reserved_exposure=0.)
+                self._update_plan_order(s,order)
+                self.ledger.audit(order['created_at'],'pending_repricing_rejected',{'id':order['id'],'reason':str(error)})
 
     def cancel(self,key,now):
         with self.ledger.transaction() as s:
             o=s["orders"][key]
             if o["status"]=="NEW":
-                o["status"]="CANCELLED";o["reserved_risk"]=0.
+                o["status"]="CANCELLED";o["reserved_risk"]=0.;o['reserved_exposure']=0.
                 self._update_plan_order(s,o)
                 self.ledger.audit(now,"order_cancelled",{"id":key})
             return dict(o)
@@ -121,6 +142,7 @@ class PaperEngine:
             d=Decision(symbol,analysis["side"],analysis["entry"],analysis["stop"],analysis["target"],now,expires,
                        analysis["strategy"],"Plano PAPER / "+analysis["reason"])
             spec=self.specs.get(symbol)
+            self._refresh_reservations(s)
             qty,reason=self.risk.assess(s,d,spec,now) if spec else (0,"Unknown instrument")
             if not qty: raise ValueError("Risco bloqueou o plano: "+reason)
             plan.update(armed_at=now.isoformat(),expires=expires.isoformat(),preview_quantity=qty)
@@ -140,7 +162,7 @@ class PaperEngine:
             if order and order["status"] in ("FILLED","PARTIAL","CLOSED"):
                 raise ValueError("Plano já executado; use o gerenciamento de posições PAPER")
             if order and order["status"]=="NEW":
-                order["status"]="CANCELLED";order["reserved_risk"]=0.
+                order["status"]="CANCELLED";order["reserved_risk"]=0.;order['reserved_exposure']=0.
             plan["state"]="CANCELLED"
             self.ledger.audit(now,"plan_cancelled",{"id":key})
 
@@ -177,7 +199,7 @@ class PaperEngine:
             if enabled:
                 for o in s["orders"].values():
                     if o["status"]=="NEW":
-                        o["status"]="CANCELLED";o["reserved_risk"]=0.;self._update_plan_order(s,o)
+                        o["status"]="CANCELLED";o["reserved_risk"]=0.;o['reserved_exposure']=0.;self._update_plan_order(s,o)
             self.ledger.audit(now,"emergency",{"enabled":bool(enabled),"open_positions":len(s["positions"]),"effect":"block entries; protective exits continue"})
 
     def connection(self,connected,now):
@@ -186,19 +208,20 @@ class PaperEngine:
             if not connected:
                 for o in s["orders"].values():
                     if o["status"]=="NEW":
-                        o["status"]="CANCELLED";o["reserved_risk"]=0.;self._update_plan_order(s,o)
+                        o["status"]="CANCELLED";o["reserved_risk"]=0.;o['reserved_exposure']=0.;self._update_plan_order(s,o)
             self.ledger.audit(now,"connection",{"connected":bool(connected)})
 
     def _fill(self,s,o,b):
         o["bars_waited"]+=1
         if o["bars_waited"]<self.costs.latency_bars: return
-        spec=self.specs[o["symbol"]];direction=1 if o["side"]=="BUY" else -1
-        slip=(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick
-        # Adverse tick rounding.
-        import math
-        raw=b.open+direction*slip
-        price=(math.ceil(raw/spec.tick) if direction>0 else math.floor(raw/spec.tick))*spec.tick
+        spec=self.specs[o["symbol"]]
+        try:price=self.costs.entry_price(b.open,o['side'],spec.tick)
+        except ValueError:
+            o.update(status='REJECTED',message='Adverse entry price invalid',reserved_risk=0.,reserved_exposure=0.)
+            self._update_plan_order(s,o);return
         d=self._decision(o)
+        self._refresh_reservations(s)
+        if o['status']!='NEW':return
         qty,reason=self.risk.assess(s,d,spec,b.ts,entry=price,exclude=o["id"])
         qty=min(qty,o["qty"],int(s.get("liquidity",{}).get(b.symbol,0)/spec.volume_per_unit*self.costs.participation)//spec.lot*spec.lot)
         if qty<spec.lot:
@@ -210,18 +233,14 @@ class PaperEngine:
                 "entry":price,"stop":o["stop"],"initial_stop":o["stop"],"target":o["target"],"point_value":spec.point_value,
                 "tick":spec.tick,"margin":spec.margin,"entry_fee":self.costs.fee(price,spec.point_value,qty),
                 "opened_at":b.ts.isoformat(),"strategy":o["strategy"],"regime":o.get("regime","unknown"),"source":b.source}
-        o["reserved_risk"]=0.
+        o["reserved_risk"]=0.;o['reserved_exposure']=0.
         self._update_plan_order(s,o)
         self.ledger.audit(b.ts,"execution",{"id":o["id"],"status":o["status"],"message":reason,"filled":qty})
 
     def _close(self,s,p,price,reason,ts):
-        direction=1 if p["side"]=="BUY" else -1
-        adverse=(self.costs.slippage_ticks+self.costs.spread_ticks/2)*p["tick"]
-        price-=direction*adverse
-        if price<=0: raise ValueError("Exit price invalid")
-        gross=(price-p["entry"])*direction*p["qty"]*p["point_value"]
-        fees=p["entry_fee"]+self.costs.fee(price,p['point_value'],p['qty'])
-        trade={**p,"exit":price,"closed_at":ts.isoformat(),"exit_reason":reason,"gross":gross,"fees":fees,"net":gross-fees}
+        price=self.costs.exit_price(price,p['side'],p['tick'])
+        gross,fees,net=self.costs.cashflow(p['entry'],price,p['side'],p['point_value'],p['qty'],entry_fee=p['entry_fee'])
+        trade={**p,"exit":price,"closed_at":ts.isoformat(),"exit_reason":reason,"gross":gross,"fees":fees,"net":net}
         s["trades"].append(trade)
         del s["positions"][p["id"]]
         s["orders"][p["id"]]["status"]="CLOSED"
@@ -270,7 +289,7 @@ class PaperEngine:
                             expired=b.ts>datetime.fromisoformat(o["expires"])
                             o["status"]="REJECTED" if expired else "CANCELLED"
                             o["message"]="Expired signal" if expired else "Missing candles before next open"
-                            o["reserved_risk"]=0.
+                            o["reserved_risk"]=0.;o['reserved_exposure']=0.
                             self._update_plan_order(s,o)
                     s.setdefault("liquidity",{}).pop(b.symbol,None)
                     self.ledger.audit(b.ts,"data_gap",{"symbol":b.symbol,"previous_close":previous,
@@ -283,7 +302,7 @@ class PaperEngine:
                 b=by_symbol.get(o["symbol"])
                 if b is not None and o["status"]=="NEW":
                     if sources[b.symbol]!=o.get("source",b.source):
-                        o["status"]="REJECTED";o["message"]="Data source changed";o["reserved_risk"]=0.
+                        o["status"]="REJECTED";o["message"]="Data source changed";o["reserved_risk"]=0.;o['reserved_exposure']=0.
                         self._update_plan_order(s,o)
                     elif b.ts>=datetime.fromisoformat(o["signal_ts"]): self._fill(s,o,b)
             for b in bars:
@@ -357,5 +376,5 @@ class PaperEngine:
         with self.ledger.transaction() as s:
             for o in s["orders"].values():
                 if o["status"]=="NEW":
-                    o["status"]="CANCELLED";o["reserved_risk"]=0.;self._update_plan_order(s,o)
+                    o["status"]="CANCELLED";o["reserved_risk"]=0.;o['reserved_exposure']=0.;self._update_plan_order(s,o)
             for p in list(s["positions"].values()): self._close(s,p,s["marks"][p["symbol"]],"FLATTEN",now)
