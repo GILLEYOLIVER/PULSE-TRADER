@@ -371,7 +371,8 @@ class SuggestionsPanel:
                        "FLAT": "#ffd27b" if dark else "#825d12", "UNKNOWN": "#91a5bf" if dark else "#52667f"}
         for trend, color in self.colors.items():
             self.table.tag_configure(trend, foreground=color)
-        self.detail.configure(bg="#111e30" if dark else "#ffffff", fg="#edf3fc" if dark else "#17273d")
+        self.detail.configure(bg="#111e30" if dark else "#ffffff", fg="#edf3fc" if dark else "#17273d",
+                              selectbackground="#175de0",selectforeground="white")
         self.show_selected()
 
     def show_sources(self):

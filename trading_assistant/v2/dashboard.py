@@ -151,6 +151,9 @@ class Dashboard:
         self._button(self.results,"Treinar modelo com CSV",self.train_model)
 
         settings=ttk.Frame(self.tabs,padding=12);self.tabs.add(settings,text="Risco e estratégias")
+        settings_actions=ttk.Frame(settings);settings_actions.pack(side="bottom",fill="x")
+        self._button(settings_actions,"Validar e aplicar configuração",self.apply_settings,style="Accent.TButton")
+        self._button(settings_actions,"Liberar emergência local",lambda:self.emergency(False))
         settings_controls=ttk.Frame(settings);settings_controls.pack(fill='x')
         self._button(settings_controls,'Editar todos os parâmetros em formulários',self.open_settings,style='Accent.TButton')
         ttk.Label(settings,text="Valores na moeda da conta; risco por operação em fração (0.005 = 0,5%). Margens e custos são premissas de simulação.",wraplength=1000).pack(anchor="w",padx=8,pady=8)
@@ -163,24 +166,41 @@ class Dashboard:
             "max_trades":("Operações/dia",self.limits.max_trades),
             "strategy":("Estratégia",self.engine.strategy.name),
         }
-        self.quick_vars={}
+        self.quick_vars={};self.quick_widgets={};quick_groups=[]
         for col,(key,(label,value)) in enumerate(self.quick_fields.items()):
-            quick.columnconfigure(col,weight=1)
-            ttk.Label(quick,text=label,style="Section.TLabel").grid(row=0,column=col,sticky="w",padx=4)
+            field=ttk.Frame(quick);quick_groups.append(field)
+            ttk.Label(field,text=label,style="Section.TLabel").pack(anchor="w")
             var=tk.StringVar(value=str(value));self.quick_vars[key]=var
             if key=="strategy":
-                widget=ttk.Combobox(quick,textvariable=var,values=("trend","breakout","pullback","adaptive","sma_cross","ema_pullback"),state="readonly",width=15)
+                widget=ttk.Combobox(field,textvariable=var,values=("trend","breakout","pullback","adaptive","sma_cross","ema_pullback"),state="readonly",width=15)
             else:
-                widget=ttk.Entry(quick,textvariable=var,width=17)
-            widget.grid(row=1,column=col,sticky="ew",padx=4,pady=(5,8))
-        ttk.Button(quick,text="Aplicar controles principais",style="Accent.TButton",
-                   command=lambda:self.guard(self.apply_quick_settings)).grid(row=2,column=0,columnspan=3,sticky="w",padx=4)
+                widget=ttk.Entry(field,textvariable=var,width=17)
+            widget.pack(fill="x",pady=(5,0));self.quick_widgets[key]=widget
+        quick_apply=ttk.Button(quick,text="Aplicar controles principais",style="Accent.TButton",
+                   command=lambda:self.guard(self.apply_quick_settings))
+        quick_columns=None
+        def arrange_quick(event):
+            nonlocal quick_columns
+            width=max(group.winfo_reqwidth()+8 for group in quick_groups)
+            columns=next((n for n in (6,3,2,1) if n*width<=event.width-24),1)
+            if columns==quick_columns:return
+            quick_columns=columns
+            for col in range(6):quick.columnconfigure(col,weight=1 if col<columns else 0,uniform="quick" if col<columns else "")
+            for index,group in enumerate(quick_groups):
+                group.grid(row=index//columns,column=index%columns,sticky="ew",padx=4,pady=(0,8))
+            quick_apply.grid(row=(len(quick_groups)+columns-1)//columns,column=0,columnspan=columns,sticky="w",padx=4)
+        quick.bind("<Configure>",arrange_quick)
         ttk.Label(settings,text="Configuração avançada: ativos, horários, custos, stops e calendário conferido pelo usuário em JSON.",style="Section.TLabel").pack(anchor="w",padx=8)
-        self.settings_text=tk.Text(settings,height=15,font=("Consolas",11),wrap="none",padx=12,pady=10,relief="flat",highlightthickness=1)
-        self.settings_text.pack(fill="both",expand=True,padx=8)
+        editor=ttk.Frame(settings);editor.pack(fill="both",expand=True,padx=8)
+        self.settings_text=tk.Text(editor,height=15,font=("Consolas",11),wrap="none",padx=12,pady=10,relief="flat",highlightthickness=1)
+        self.settings_text.grid(row=0,column=0,sticky="nsew")
+        editor_y=ttk.Scrollbar(editor,orient="vertical",command=self.settings_text.yview)
+        editor_y.grid(row=0,column=1,sticky="ns")
+        editor_x=ttk.Scrollbar(editor,orient="horizontal",command=self.settings_text.xview)
+        editor_x.grid(row=1,column=0,sticky="ew")
+        self.settings_text.configure(yscrollcommand=editor_y.set,xscrollcommand=editor_x.set)
+        editor.rowconfigure(0,weight=1);editor.columnconfigure(0,weight=1)
         self.settings_text.insert("1.0",json.dumps({"limits":asdict(self.limits),"execution":asdict(self.costs),"strategy":{"name":self.engine.strategy.name,"reward_r":self.engine.strategy.reward_r,"stop_atr":self.engine.strategy.stop_atr,"multi_timeframe":self.engine.strategy.multi_timeframe},"calendar":self.engine.calendar.to_config() if self.engine.calendar else None},indent=2))
-        self._button(settings,"Validar e aplicar configuração",self.apply_settings,style="Accent.TButton")
-        self._button(settings,"Liberar emergência local",lambda:self.emergency(False))
 
         about=ttk.Frame(self.tabs,padding=22);self.tabs.add(about,text="Conexões e ajuda")
         ttk.Label(about,text="RICO / PROFIT  •  DESCONECTADO",style="Section.TLabel").pack(anchor="w",pady=(0,10))
@@ -238,14 +258,20 @@ class Dashboard:
             ("#0c1422","#edf3fc","#111e30","#19283b","#91a5bf","#30435d") if self.dark else
             ("#edf2f8","#17273d","#ffffff","#f7faff","#52667f","#cbd6e4"))
         accent="#438cff" if self.dark else "#175de0"
-        self.root.configure(bg=bg)
+        selection="#175de0"
+        if hasattr(self.root,"_get_window_scaling"):self.root.configure(fg_color=bg)
+        else:self.root.configure(bg=bg)
+        for option,value in (("*Toplevel.background",bg),("*Canvas.background",bg),
+                ("*TCombobox*Listbox.background",panel),("*TCombobox*Listbox.foreground",fg),
+                ("*TCombobox*Listbox.selectBackground",selection),("*TCombobox*Listbox.selectForeground","#ffffff")):
+            self.root.option_add(option,value)
         st=ttk.Style(self.root);st.theme_use("clam")
         st.configure(".",background=bg,foreground=fg,font=("Segoe UI",10))
         st.configure("TFrame",background=bg)
         st.configure("TLabel",background=bg,foreground=fg)
         st.configure("Brand.TLabel",font=("Segoe UI Semibold",19),foreground=accent)
         st.configure("BrandMuted.TLabel",font=("Segoe UI Semibold",19),foreground=fg)
-        st.configure("Badge.TLabel",background=raised,foreground="#8fd9ff",font=("Segoe UI Semibold",10),padding=(12,6))
+        st.configure("Badge.TLabel",background=raised,foreground="#8fd9ff" if self.dark else "#175de0",font=("Segoe UI Semibold",10),padding=(12,6))
         st.configure("Status.TLabel",foreground=muted,font=("Segoe UI",10))
         st.configure("Section.TLabel",foreground=muted,font=("Segoe UI Semibold",9))
         st.configure("Metric.TFrame",background=panel,borderwidth=1,relief="solid")
@@ -256,23 +282,44 @@ class Dashboard:
         st.configure("TButton",background=raised,foreground=fg,bordercolor=border,lightcolor=raised,darkcolor=raised,
                      focuscolor=accent,relief="flat",padding=(12,8),font=("Segoe UI Semibold",10))
         st.map("TButton",background=[("pressed",border),("active",panel)],foreground=[("disabled",muted)])
-        st.configure("Accent.TButton",background=accent,foreground="white",bordercolor=accent,lightcolor=accent,darkcolor=accent)
-        st.map("Accent.TButton",background=[("pressed","#184caf"),("active","#3174d9")],foreground=[("active","white")])
+        st.configure("Accent.TButton",background=selection,foreground="white",bordercolor=selection,lightcolor=selection,darkcolor=selection)
+        st.map("Accent.TButton",background=[("disabled",raised),("pressed","#123980"),("active","#184caf")],
+               foreground=[("disabled",muted),("!disabled","white")])
         st.configure("Danger.TButton",background="#572b35" if self.dark else "#fff0f0",
                      foreground="#ffb5bf" if self.dark else "#aa2338",bordercolor="#b3485b",lightcolor=panel,darkcolor=panel)
         st.map("Danger.TButton",background=[("active","#713641" if self.dark else "#ffe0e4")])
-        st.configure("TCombobox",padding=(7,7),fieldbackground=panel,background=raised,foreground=fg,arrowcolor=fg)
-        st.map("TCombobox",fieldbackground=[("readonly",panel)],foreground=[("readonly",fg)])
+        st.configure("TEntry",padding=(8,7),fieldbackground=panel,foreground=fg,insertcolor=fg,
+                     selectbackground=selection,selectforeground="white",bordercolor=border,lightcolor=border,darkcolor=border)
+        st.map("TEntry",fieldbackground=[("disabled",raised),("readonly",panel)],
+               foreground=[("disabled",muted),("readonly",fg)],
+               selectbackground=[("!disabled",selection)],selectforeground=[("!disabled","white")],
+               bordercolor=[("focus",accent)])
+        st.configure("TCombobox",padding=(7,7),fieldbackground=panel,background=raised,foreground=fg,arrowcolor=fg,
+                     insertcolor=fg,selectbackground=selection,selectforeground="white",bordercolor=border)
+        st.map("TCombobox",fieldbackground=[("disabled",raised),("readonly",panel)],
+               foreground=[("disabled",muted),("readonly",fg)],
+               selectbackground=[("!disabled",selection)],selectforeground=[("!disabled","white")],
+               bordercolor=[("focus",accent)])
+        st.configure("TLabelframe",background=bg,bordercolor=border)
+        st.configure("TLabelframe.Label",background=bg,foreground=muted)
         st.configure("TCheckbutton",background=bg,foreground=fg,padding=7)
-        st.map("TCheckbutton",background=[("active",bg)],foreground=[("active",fg)])
+        st.map("TCheckbutton",background=[("active",bg)],foreground=[("disabled",muted),("active",fg)])
         st.configure("TNotebook",background=bg,borderwidth=0)
         st.configure("TNotebook.Tab",background=bg,foreground=muted,padding=(17,10),borderwidth=0)
-        st.map("TNotebook.Tab",background=[("selected",panel)],foreground=[("selected",accent)])
+        st.map("TNotebook.Tab",background=[("selected",panel),("active",raised)],
+               foreground=[("disabled",muted),("selected",accent),("active",fg)])
         st.configure("Treeview",background=panel,fieldbackground=panel,foreground=fg,rowheight=32,borderwidth=0)
         st.configure("Treeview.Heading",background=raised,foreground=muted,padding=8,font=("Segoe UI Semibold",10))
-        st.map("Treeview",background=[("selected",accent)],foreground=[("selected","white")])
+        st.map("Treeview.Heading",background=[("active",panel)],foreground=[("active",fg)])
+        st.map("Treeview",background=[("selected",selection)],foreground=[("selected","white")])
         self.chart.configure(bg=panel)
-        self.settings_text.configure(bg=panel,fg=fg,insertbackground=fg,highlightbackground=border,highlightcolor=accent)
+        self.settings_text.configure(bg=panel,fg=fg,insertbackground=fg,highlightbackground=border,highlightcolor=accent,
+                                     selectbackground=selection,selectforeground="white")
+        def theme_dialog(widget):
+            if isinstance(widget,(tk.Toplevel,tk.Canvas)):widget.configure(bg=bg)
+            for child in widget.winfo_children():theme_dialog(child)
+        for child in self.root.winfo_children():
+            if isinstance(child,tk.Toplevel):theme_dialog(child)
         self.suggestions.apply_theme(self.dark)
         self.draw()
 
