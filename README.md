@@ -47,6 +47,13 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
 
 ## Usar
 
+O upgrade 2.1 inclui fontes públicas, conversão do Profit, validação temporal, contexto de empresas,
+planos vinculados ao replay, formulários completos e backup portátil. [Guia dos seis passos](docs/UPGRADE_6_STEPS.md).
+
+Para usar o executável já construído nesta cópia, abra **iniciar-portatil.cmd**. Ele usa a mesma pasta
+`runtime` do projeto. O ZIP portátil pode ser copiado inteiro para outra pasta; seu executável usa
+`runtime` ao lado dele. Python e SQLite estão incluídos no pacote; não há servidor de banco a instalar.
+
 1. Abra o aplicativo. A barra indica PAPER e a origem dos dados.
 2. Escolha o ativo e **Carregar simulação**, ou use **Importar CSV**.
 3. Em **Risco e estratégias**, ajuste capital, risco por operação, perda diária,
@@ -68,6 +75,17 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
    **Exemplo simulado** para conhecer a tela. Setas e cores mostram alta, baixa ou lateralização;
    selecione o ativo para ler o motivo, a condição de entrada, stop e alvo.
    **Guardar plano PAPER** salva uma proposta sem criar uma ordem. [Guia das sugestões](docs/SUGGESTIONS.md).
+10. **Fontes e atualização** consulta históricos públicos da brapi (PETR4/VALE3/ITUB4/MGLU3 sem token)
+    ou Mercado Bitcoin (BTC/ETH spot BRL), com atualização opcional a cada 60 segundos.
+    O mesmo painel converte CSV do Profit com seleção de período e horário de abertura/encerramento.
+11. **Levar ao replay** prepara o histórico sem gerar entradas. **Armar entrada PAPER** verifica a
+    identidade dos dados, configurações e risco. Planos condicionais aguardam confirmação em candle fechado;
+    a ordem só pode preencher no candle seguinte. **Cancelar plano** cancela pendências ligadas ao plano.
+12. **Validar histórico** executa estudo temporal e custos em segundo plano. Uma estratégia sem evidência
+    suficiente não é promovida automaticamente. **Risco e estratégias > Editar todos os parâmetros**
+    permite configurar todos os limites, custos, horários, calendário, estratégia e especificações sem JSON.
+13. Em **Conexões e ajuda**, crie backups consistentes com o programa aberto e restaure em outra pasta vazia.
+    A cópia inclui os bancos e arquivos locais; a restauração verifica hashes e integridade dos bancos.
 
 O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
 períodos de **1, 5 e 15 minutos** quando os dados de origem permitem, e temas claro/escuro.
@@ -149,11 +167,11 @@ se stop e alvo forem tocados no mesmo candle, considera stop primeiro. Trailing 
 ## Limites desta entrega
 
 - Rico/Profit: fronteira bloqueada; falta confirmar habilitação, licença, SDK e ambiente autorizado.
-- Sem feed B3 em tempo real, calendário oficial carregado, rolagem automática, leilões ou simulação de fila.
+- APIs públicas fornecem histórico com referência de data; não são um feed oficial B3 em tempo real. Sem calendário oficial completo, rolagem automática, leilões ou simulação de fila.
 - Backtest de portfólio exige candles sincronizados e completos para todos os ativos; não simula horários de negociação distintos.
 - Taxas/margens são entradas de simulação, sem tributação ou ajuste diário completo de futuros.
-- ML opcional simples, com validação temporal e baselines; não foi validado para operar mercados.
-- CustomTkinter e Pillow foram exercitados no ambiente virtual local; empacotamento `.exe` e distribuição externa ainda não foram validados.
+- Modelos passam por treino/validação/teste separados e calibração condicional. Nos quatro estudos reais realizados, nenhum passou pelo filtro de evidência ou calibração.
+- `scripts/build.ps1` gera executável e ZIP portáteis, com teste interno offline. Assinatura e homologação em outro computador permanecem externas a esta entrega local.
 - Módulos anteriores permanecem para estudo, notícias e compatibilidade. Seu roteador de ordens foi desativado
   para impedir que contornem o ledger novo. A entrada `python -m trading_assistant` abre a versão nova.
 

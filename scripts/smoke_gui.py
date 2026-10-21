@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import tempfile
 from unittest.mock import patch
 from pathlib import Path
@@ -26,6 +27,10 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
     report_path=Path(tmp)/'ui-backtest.json'
     with patch('trading_assistant.v2.dashboard.filedialog.asksaveasfilename',return_value=str(report_path)):
         d.backtest()
+    deadline=time.monotonic()+15
+    while d.jobs.busy and time.monotonic()<deadline:
+        d.root.update();time.sleep(.01)
+    assert not d.jobs.busy
     report=json.loads(report_path.read_text(encoding='utf-8'))
     assert report['calendar']==settings['calendar']
     assert not any(order['filled_qty'] for order in report['orders'])

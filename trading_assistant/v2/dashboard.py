@@ -11,7 +11,7 @@ try:
     from PIL import Image,ImageDraw,ImageTk
 except ImportError:
     Image=ImageDraw=ImageTk=None
-from .models import Limits,ExecutionSettings,Decision,INSTRUMENTS,UTC
+from .models import Limits,ExecutionSettings,Decision,Instrument,INSTRUMENTS,UTC
 from .data import SyntheticProvider,CSVProvider,aggregate,CandleStore
 from .execution import PaperEngine
 from .ledger import Ledger
@@ -21,6 +21,8 @@ from .chart_raster import antialiased_lines_png
 from .session import local_time
 from .session import SessionCalendar
 from .suggestions_ui import SuggestionsPanel
+from .jobs import BackgroundJobs
+from . import __version__
 
 class Dashboard:
     def __init__(self,data_dir=None):
@@ -37,7 +39,7 @@ class Dashboard:
             ctk.set_appearance_mode("dark");self.root=ctk.CTk()
         except ImportError:
             self.root=tk.Tk()
-        self.root.title("PULSE-TRADER 2.0 | PAPER")
+        self.root.title(f"PULSE-TRADER {__version__} | PAPER")
         scale=self.root._get_window_scaling() if hasattr(self.root,"_get_window_scaling") else 1.
         available_width=max(640,int((self.root.winfo_screenwidth()-40)/scale))
         available_height=max(480,int((self.root.winfo_screenheight()-100)/scale))
@@ -49,13 +51,15 @@ class Dashboard:
         config=self.ledger.read().get("config",{})
         self.limits=Limits(**config.get("limits",{}));self.costs=ExecutionSettings(**config.get("costs",{}))
         calendar=SessionCalendar.from_config(config["calendar"]) if config.get("calendar") is not None else None
-        self.engine=PaperEngine(self.ledger,self.limits,self.costs,strategy=Strategy(**config.get("strategy",{})),calendar=calendar)
+        specs={key:Instrument(**value) for key,value in config['instruments'].items()} if config.get('instruments') else None
+        self.engine=PaperEngine(self.ledger,self.limits,self.costs,instruments=specs,strategy=Strategy(**config.get("strategy",{})),calendar=calendar)
         self.bars=[];self.feed=[];self.cursor=0;self.running=False;self.timer=None
         self.window=70;self.offset=0;self.dark=True;self._chart_image=None
         self.symbol=tk.StringVar(value="WIN");self.strategy=tk.StringVar(value="trend")
         self._period_seconds={"1 min":60,"5 min":300,"15 min":900}
         self.timeframe=tk.StringVar(value="1 min");self.auto=tk.BooleanVar(value=True)
         self.status=tk.StringVar(value="PAPER | Fonte: SYNTHETIC | Sem conexão com corretora")
+        self.jobs=BackgroundJobs(self.root,self.background_error)
         self.summary=tk.StringVar();self.signal_text=tk.StringVar(value="Aguardando 35 candles fechados. Confiança estatística: indisponível.")
         self.metrics={key:tk.StringVar(value="—") for key in ("capital","day","exposure","positions","trades","emergency")}
         self._build();self._theme();self._restore_feed();self.refresh()
@@ -70,12 +74,16 @@ class Dashboard:
         except Exception as e:
             self.pause();self.status.set("BLOQUEADO: "+str(e));messagebox.showerror("PULSE-TRADER",str(e),parent=self.root)
 
+    def background_error(self,error):
+        self.status.set('Tarefa interrompida: '+str(error))
+        messagebox.showerror('PULSE-TRADER',str(error),parent=self.root)
+
     def _build(self):
         top=ttk.Frame(self.root,padding=(18,12));top.pack(fill="x")
         ttk.Label(top,text="PULSE",style="Brand.TLabel").pack(side="left")
         ttk.Label(top,text=" / TRADER",style="BrandMuted.TLabel").pack(side="left")
         self._button(top,"Alternar tema",self.toggle_theme,side="right")
-        ttk.Label(top,text="PAPER  •  2.0",style="Badge.TLabel").pack(side="right",padx=14)
+        ttk.Label(top,text=f"PAPER  •  {__version__}",style="Badge.TLabel").pack(side="right",padx=14)
         ttk.Label(self.root,textvariable=self.status,style="Status.TLabel").pack(fill="x",padx=20,pady=(0,12))
 
         overview=ttk.Frame(self.root);overview.pack(fill="x",padx=16,pady=(0,10))
@@ -91,7 +99,8 @@ class Dashboard:
         toolbar=ttk.Frame(self.root,padding=(12,3));toolbar.pack(fill="x",padx=16)
         source=ttk.Frame(toolbar);source.pack(fill="x")
         ttk.Label(source,text="ATIVO",style="Section.TLabel").pack(side="left",padx=(4,8))
-        ttk.Combobox(source,textvariable=self.symbol,values=list(INSTRUMENTS),width=10,state="readonly").pack(side="left",padx=4)
+        self.asset_combo=ttk.Combobox(source,textvariable=self.symbol,values=list(self.engine.specs),width=10,state="readonly")
+        self.asset_combo.pack(side="left",padx=4)
         self._button(source,"Carregar simulação",self.load_synthetic)
         self._button(source,"Importar CSV",self.import_csv)
         playback=ttk.Frame(toolbar);playback.pack(fill="x")
@@ -142,6 +151,8 @@ class Dashboard:
         self._button(self.results,"Treinar modelo com CSV",self.train_model)
 
         settings=ttk.Frame(self.tabs,padding=12);self.tabs.add(settings,text="Risco e estratégias")
+        settings_controls=ttk.Frame(settings);settings_controls.pack(fill='x')
+        self._button(settings_controls,'Editar todos os parâmetros em formulários',self.open_settings,style='Accent.TButton')
         ttk.Label(settings,text="Valores em R$; risco por operação em fração (0.005 = 0,5%). Margens e custos são premissas de simulação.",wraplength=1000).pack(anchor="w",padx=8,pady=8)
         quick=ttk.LabelFrame(settings,text="Controles principais (PAPER)",padding=(12,8));quick.pack(fill="x",padx=8,pady=(0,10))
         self.quick_fields={
@@ -180,6 +191,40 @@ class Dashboard:
                    "os stops continuam ativos na simulação. Use Zerar posições PAPER para encerrar exposições simuladas.\n\n"
                    "Dados, posições e bloqueios ficam no SQLite local. Fechar o aplicativo pausa a simulação.")
         ttk.Label(about,text=help_text,style="Help.TLabel",justify="left",wraplength=960).pack(anchor="nw",fill="x")
+        self._button(about,'Criar backup da pasta de dados',self.backup_data)
+        self._button(about,'Restaurar backup em outra pasta',self.restore_data)
+        self._button(about,'Abrir outra pasta de dados',self.open_data_directory)
+
+    def open_settings(self):
+        from .settings_ui import SettingsWindow
+        return SettingsWindow(self)
+
+    def backup_data(self):
+        from .backups import create_backup
+        path=filedialog.asksaveasfilename(parent=self.root,defaultextension='.zip',initialfile='pulse-backup-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.zip')
+        if path:
+            self.jobs.start(lambda:create_backup(self.data_dir,path),lambda result:self.status.set('Backup verificado: '+result['path']))
+
+    def restore_data(self):
+        from .backups import restore_backup
+        path=filedialog.askopenfilename(parent=self.root,title='Backup PULSE',filetypes=[('ZIP','*.zip')])
+        if not path:return
+        directory=filedialog.askdirectory(parent=self.root,title='Escolha uma pasta vazia para restaurar')
+        if directory:
+            def done(result):
+                self.status.set('Backup restaurado em '+result['directory'])
+                if messagebox.askyesno('Backup restaurado','Abrir os dados restaurados agora? A pasta atual será preservada.',parent=self.root):
+                    self.open_data_directory(result['directory'])
+            self.jobs.start(lambda:restore_backup(path,directory),done)
+
+    def open_data_directory(self,directory=None):
+        import subprocess,sys
+        directory=directory or filedialog.askdirectory(parent=self.root,title='Pasta dos dados PULSE')
+        if not directory:return
+        destination=Path(directory).resolve()
+        command=[sys.executable] if getattr(sys,'frozen',False) else [sys.executable,str(Path(__file__).resolve().parents[2]/'main.py')]
+        subprocess.Popen(command+['--data-dir',str(destination)],creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+        self.close()
 
     def _theme(self):
         bg,fg,panel,raised,muted,border=(
@@ -251,7 +296,7 @@ class Dashboard:
         base=self.feed[0].seconds if self.feed else 60
         available=[seconds for seconds in (60,300,900) if seconds>=base and seconds%base==0]
         if base not in available:available.insert(0,base)
-        self._period_seconds={f"{seconds//60} min" if seconds%60==0 else f"{seconds} s":seconds
+        self._period_seconds={"Diário" if seconds==86400 else f"{seconds//60} min" if seconds%60==0 else f"{seconds} s":seconds
                               for seconds in available}
         self.period_combo.configure(values=tuple(self._period_seconds))
         if self.timeframe.get() not in self._period_seconds:
@@ -319,8 +364,10 @@ class Dashboard:
         self.pause();data=json.loads(self.settings_text.get("1.0","end"))
         limits=Limits(**data["limits"]);costs=ExecutionSettings(**data["execution"]);strategy=Strategy(**data["strategy"])
         calendar=SessionCalendar.from_config(data["calendar"]) if data.get("calendar") is not None else None
-        engine=PaperEngine(self.ledger,limits,costs,strategy=strategy,calendar=calendar);engine.history=self.engine.history
+        specs={key:Instrument(**value) for key,value in data['instruments'].items()} if data.get('instruments') else self.engine.specs
+        engine=PaperEngine(self.ledger,limits,costs,instruments=specs,strategy=strategy,calendar=calendar);engine.history=self.engine.history
         self.engine=engine;self.limits=limits;self.costs=costs
+        self.asset_combo.configure(values=list(engine.specs))
         self.suggestions.signature=None
         self.suggestions.analyze()
         for key,value in (("capital",limits.capital),("risk_percent",limits.risk_fraction*100),
@@ -355,8 +402,12 @@ class Dashboard:
         self.pause();path=filedialog.asksaveasfilename(defaultextension=".json",initialfile="pulse-backtest.json")
         if path:
             # Separate ledger; never modifies the current paper positions.
-            report=run_backtest(self.feed,self.engine.strategy,self.limits,self.costs,calendar=self.engine.calendar);save_report(report,path)
-            self.status.set("Backtest concluído / "+str(report["metrics"]["trades"])+" operações / "+path)
+            bars=list(self.feed);strategy=self.engine.strategy;limits=self.limits;costs=self.costs;calendar=self.engine.calendar;specs=dict(self.engine.specs)
+            def done(report):
+                save_report(report,path)
+                self.status.set("Backtest concluído / "+str(report["metrics"]["trades"])+" operações / "+path)
+            self.jobs.start(lambda:run_backtest(bars,strategy,limits,costs,calendar=calendar,instruments=specs),done)
+            self.status.set('Backtest em segundo plano; a interface continua disponível…')
     def train_model(self):
         if not self.feed or self.ledger.read().get("feed",{}).get("kind")!="csv":
             raise ValueError("Importe um CSV histórico autorizado antes de treinar o modelo")
@@ -365,10 +416,13 @@ class Dashboard:
         path=filedialog.asksaveasfilename(defaultextension=".json",initialfile="pulse-modelo-paper.json")
         if path:
             from .ml import train_temporal
-            report=train_temporal(self.feed,path)
-            self.status.set(f"Modelo PAPER salvo. Acerto validação: {report['validation']['accuracy']:.1%}; "
+            bars=list(self.feed)
+            def done(report):
+                self.status.set(f"Modelo PAPER salvo. Acerto validação: {report['validation']['accuracy']:.1%}; "
                             f"referência: {report['validation']['majority_accuracy']:.1%}. "
                             "Modelo sem permissão de executar ordens.")
+            self.jobs.start(lambda:train_temporal(bars,path),done)
+            self.status.set('Treinamento em segundo plano…')
     def refresh(self):
         s=self.ledger.read();m=metrics(s["trades"],self.limits.capital)
         pnl,unrealized,worst=self.engine.risk.period_pnl(s,self.now())
@@ -493,7 +547,8 @@ class Dashboard:
         c.create_text(right-10,18,anchor="e",fill="#ffd27b",text="EMA 9",font=("Segoe UI Semibold",9))
         c.create_text(right-82,18,anchor="e",fill="#a9a1ff",text="EMA 21",font=("Segoe UI Semibold",9))
 
-    def close(self):self.pause();self.ledger.close();self.root.destroy()
+    def close(self):
+        self.pause();self.suggestions.data_center.close();self.jobs.close();self.ledger.close();self.root.destroy()
     def run(self):self.root.mainloop()
 
 def launch_dashboard():Dashboard().run()

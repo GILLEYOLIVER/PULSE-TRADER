@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.1.0 - 2026-10-20
+
+- Added read-only brapi/Mercado Bitcoin data, scheduled refresh and explicit locale/timeframe Profit CSV conversion.
+- Added financial/dividend/CVM filing context with publication cutoffs and review alerts.
+- Added chronological research with holdout, cost stress, conditional calibration and real PETR4/VALE3 reports; no model passed adoption/calibration gates.
+- Linked saved plans to the exact replay history and central risk checks, with conditional triggers, expiry, cancellation and transactional order state.
+- Added complete settings forms, background jobs, consistent backups/verified restore and portable Windows build/self-test.
+
 - Add a multi-asset Suggestions tab with intraday/daily profiles, visual trend, reasons and conditional entry/stop/target proposals.
 - Persist authorized analysis candles and idempotent PAPER proposals without creating orders; exclude unfinished/future candles.
 - Fit the initial desktop window to the screen at Windows display scaling.

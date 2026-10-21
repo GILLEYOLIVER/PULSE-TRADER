@@ -35,41 +35,138 @@ class PaperEngine:
     def submit(self,d:Decision,key=None,requested=None):
         key=key or hashlib.sha256(f"{d.symbol}|{d.strategy}|{aware(d.ts).isoformat()}|{d.side}".encode()).hexdigest()
         with self.ledger.transaction() as s:
-            if key in s["orders"]:
-                old=s["orders"][key]
-                if (old["symbol"],old["side"],old["price"],old["stop"],old["target"],
-                    old["signal_ts"],old["expires"],old["strategy"],old.get("requested_qty")) != (
-                    d.symbol,d.side,d.price,d.stop,d.target,d.ts.isoformat(),d.expires.isoformat(),d.strategy,requested):
-                    raise ValueError("Idempotency key reused for different order")
-                return dict(old)
-            spec=self.specs.get(d.symbol)
-            qty,reason=self.risk.assess(s,d,spec,d.ts,requested=requested) if spec else (0,"Unknown instrument")
-            order={"id":key,"symbol":d.symbol,"side":d.side,"price":d.price,"stop":d.stop,"target":d.target,
-                "signal_ts":d.ts.isoformat(),"expires":d.expires.isoformat(),"created_at":d.ts.isoformat(),
-                "regime":"volatile" if d.indicators.get("volatility_ratio",0)>2 else "trend" if d.indicators.get("trend_strength",0)>.5 else "range","strategy":d.strategy,"reason":d.reason,"source":s["last_sources"].get(d.symbol),"qty":qty,"filled_qty":0,"status":"NEW" if qty else "REJECTED",
-                "message":reason,"requested_qty":requested,"bars_waited":0,"point_value":spec.point_value if spec else 0.,
-                "margin":spec.margin if spec else 0.,"reserved_risk":0.}
-            if qty:
-                per_unit=abs(d.price-d.stop)*spec.point_value+2*self.costs.fee_per_unit+2*(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick*spec.point_value
-                order["reserved_risk"]=qty*per_unit
-            s["orders"][key]=order
-            self.ledger.audit(d.ts,"order_"+order["status"].lower(),{"id":key,"message":reason,"quantity":qty})
-            return dict(order)
+            return self._submit(s,d,key,requested)
+
+    def _submit(self,s,d,key,requested=None):
+        if key in s["orders"]:
+            old=s["orders"][key]
+            if (old["symbol"],old["side"],old["price"],old["stop"],old["target"],
+                old["signal_ts"],old["expires"],old["strategy"],old.get("requested_qty")) != (
+                d.symbol,d.side,d.price,d.stop,d.target,d.ts.isoformat(),d.expires.isoformat(),d.strategy,requested):
+                raise ValueError("Idempotency key reused for different order")
+            return dict(old)
+        spec=self.specs.get(d.symbol)
+        qty,reason=self.risk.assess(s,d,spec,d.ts,requested=requested) if spec else (0,"Unknown instrument")
+        order={"id":key,"symbol":d.symbol,"side":d.side,"price":d.price,"stop":d.stop,"target":d.target,
+            "signal_ts":d.ts.isoformat(),"expires":d.expires.isoformat(),"created_at":d.ts.isoformat(),
+            "regime":"volatile" if d.indicators.get("volatility_ratio",0)>2 else "trend" if d.indicators.get("trend_strength",0)>.5 else "range","strategy":d.strategy,"reason":d.reason,"source":s["last_sources"].get(d.symbol),"qty":qty,"filled_qty":0,"status":"NEW" if qty else "REJECTED",
+            "message":reason,"requested_qty":requested,"bars_waited":0,"point_value":spec.point_value if spec else 0.,
+            "margin":spec.margin if spec else 0.,"reserved_risk":0.}
+        if qty:
+            per_unit=abs(d.price-d.stop)*spec.point_value+2*self.costs.fee_per_unit+2*(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick*spec.point_value
+            order["reserved_risk"]=qty*per_unit
+        s["orders"][key]=order
+        self.ledger.audit(d.ts,"order_"+order["status"].lower(),{"id":key,"message":reason,"quantity":qty})
+        return dict(order)
 
     def cancel(self,key,now):
         with self.ledger.transaction() as s:
             o=s["orders"][key]
             if o["status"]=="NEW":
                 o["status"]="CANCELLED";o["reserved_risk"]=0.
+                self._update_plan_order(s,o)
                 self.ledger.audit(now,"order_cancelled",{"id":key})
             return dict(o)
+
+    def _update_plan_order(self,s,order):
+        if not order['id'].startswith('plan:'):return
+        plan=s.get('analysis_plans',{}).get(order['id'][5:])
+        if not plan:return
+        status=order['status']
+        plan['state']={'NEW':'ORDERED','FILLED':'EXECUTED','PARTIAL':'EXECUTED','CLOSED':'CLOSED'}.get(status,status)
+        plan['quantity']=order.get('filled_qty',0) if status!='NEW' else order['qty']
+        plan['risk_approved']=bool(plan['quantity']) and status not in ('REJECTED','CANCELLED')
+        if order.get('filled_price') is not None:plan['actual_entry']=order['filled_price']
+
+    def _check_plan_config(self,plan):
+        import json
+        canonical=lambda value:json.dumps(value,sort_keys=True)
+        for key,current in (("limits",self.limits),("execution",self.costs),("parameters",self.strategy)):
+            if canonical(plan[key])!=canonical(asdict(current)):
+                raise ValueError("Configuração mudou desde a proposta; gere um novo plano")
+        spec=self.specs.get(plan['analysis']['symbol'])
+        if not spec or canonical(plan.get('instrument'))!=canonical(asdict(spec)):
+            raise ValueError('Especificação do ativo mudou ou plano antigo; gere uma nova proposta')
+
+    def arm_plan(self,key,now):
+        """Bind a saved plan to the exact closed history, then use the central entry gate."""
+        from .suggestions import history_digest
+        now=aware(now)
+        with self.ledger.transaction() as s:
+            plan=s.get("analysis_plans",{}).get(key)
+            if not plan: raise ValueError("Plano não encontrado")
+            if plan["state"]!="PROPOSAL_ONLY": return dict(plan)
+            if (plan.get('context') or {}).get('review_required') and not plan.get('context_ack'):
+                raise ValueError('Revise os alertas corporativos antes de armar este plano')
+            self._check_plan_config(plan)
+            analysis=plan["analysis"];symbol=analysis["symbol"]
+            history=self.history.get(symbol,[])
+            if (not history or analysis.get("history_sha256")!=history_digest(history[-1000:])
+                or s["last_sources"].get(symbol)!=analysis["source"]
+                or s["last_bars"].get(symbol)!=analysis["closed_at"]
+                or now!=datetime.fromisoformat(analysis["closed_at"])):
+                raise ValueError("Carregue este histórico no replay e avance até o candle da análise antes de armar")
+            expires=now+timedelta(seconds=analysis["seconds"]*3)
+            d=Decision(symbol,analysis["side"],analysis["entry"],analysis["stop"],analysis["target"],now,expires,
+                       analysis["strategy"],"Plano PAPER / "+analysis["reason"])
+            spec=self.specs.get(symbol)
+            qty,reason=self.risk.assess(s,d,spec,now) if spec else (0,"Unknown instrument")
+            if not qty: raise ValueError("Risco bloqueou o plano: "+reason)
+            plan.update(armed_at=now.isoformat(),expires=expires.isoformat(),preview_quantity=qty)
+            if analysis["setup"]=="CONFIRMED":
+                order=self._submit(s,d,"plan:"+key)
+                plan.update(state="ORDERED" if order["status"]=="NEW" else "REJECTED",order_id=order["id"],
+                            risk_approved=bool(order["qty"]),quantity=order["qty"])
+            else:
+                plan["state"]="ARMED"
+            self.ledger.audit(now,"plan_armed",{"id":key,"state":plan["state"]})
+            return dict(plan)
+
+    def cancel_plan(self,key,now):
+        with self.ledger.transaction() as s:
+            plan=s["analysis_plans"][key]
+            order=s["orders"].get(plan.get("order_id"))
+            if order and order["status"] in ("FILLED","PARTIAL","CLOSED"):
+                raise ValueError("Plano já executado; use o gerenciamento de posições PAPER")
+            if order and order["status"]=="NEW":
+                order["status"]="CANCELLED";order["reserved_risk"]=0.
+            plan["state"]="CANCELLED"
+            self.ledger.audit(now,"plan_cancelled",{"id":key})
+
+    def process_plans(self):
+        from .indicators import snapshot
+        with self.ledger.transaction() as s:
+            for key,plan in s.get("analysis_plans",{}).items():
+                if plan["state"]!="ARMED": continue
+                a=plan["analysis"];history=self.history.get(a["symbol"],[])
+                if not history: continue
+                b=history[-1];now=aware(b.ts)+timedelta(seconds=b.seconds)
+                if now<=datetime.fromisoformat(plan["armed_at"]): continue
+                if now>datetime.fromisoformat(plan["expires"]):
+                    plan["state"]="EXPIRED";self.ledger.audit(now,"plan_expired",{"id":key});continue
+                try:self._check_plan_config(plan)
+                except ValueError:
+                    plan["state"]="STALE";self.ledger.audit(now,"plan_stale",{"id":key});continue
+                if b.source!=a["source"] or b.seconds!=a["seconds"]: continue
+                confirmed=b.close>=a["entry"] if a["side"]=="BUY" else b.close<=a["entry"]
+                if not confirmed or len(history)<35 or snapshot(history)["relative_volume"]<1.2: continue
+                if self.strategy.multi_timeframe:
+                    check=Strategy(a['strategy'],self.strategy.reward_r,self.strategy.stop_atr,True).evaluate(history)
+                    if not check or check.side!=a['side']:continue
+                d=Decision(b.symbol,a["side"],b.close,a["stop"],a["target"],now,
+                           datetime.fromisoformat(plan["expires"]),a["strategy"],"Gatilho confirmado / plano PAPER")
+                order=self._submit(s,d,"plan:"+key)
+                plan.update(state="ORDERED" if order["status"]=="NEW" else "REJECTED",order_id=order["id"],
+                            risk_approved=bool(order["qty"]),quantity=order["qty"])
+                self.ledger.audit(now,"plan_triggered",{"id":key,"order_id":order["id"],"state":plan["state"]})
 
     def emergency(self,now,enabled=True):
         with self.ledger.transaction() as s:
             s["emergency"]=bool(enabled)
             if enabled:
                 for o in s["orders"].values():
-                    if o["status"]=="NEW": o["status"]="CANCELLED";o["reserved_risk"]=0.
+                    if o["status"]=="NEW":
+                        o["status"]="CANCELLED";o["reserved_risk"]=0.;self._update_plan_order(s,o)
             self.ledger.audit(now,"emergency",{"enabled":bool(enabled),"open_positions":len(s["positions"]),"effect":"block entries; protective exits continue"})
 
     def connection(self,connected,now):
@@ -77,7 +174,8 @@ class PaperEngine:
             s["connected"]=bool(connected)
             if not connected:
                 for o in s["orders"].values():
-                    if o["status"]=="NEW": o["status"]="CANCELLED";o["reserved_risk"]=0.
+                    if o["status"]=="NEW":
+                        o["status"]="CANCELLED";o["reserved_risk"]=0.;self._update_plan_order(s,o)
             self.ledger.audit(now,"connection",{"connected":bool(connected)})
 
     def _fill(self,s,o,b):
@@ -102,6 +200,7 @@ class PaperEngine:
                 "tick":spec.tick,"margin":spec.margin,"entry_fee":qty*self.costs.fee_per_unit,
                 "opened_at":b.ts.isoformat(),"strategy":o["strategy"],"regime":o.get("regime","unknown"),"source":b.source}
         o["reserved_risk"]=0.
+        self._update_plan_order(s,o)
         self.ledger.audit(b.ts,"execution",{"id":o["id"],"status":o["status"],"message":reason,"filled":qty})
 
     def _close(self,s,p,price,reason,ts):
@@ -115,6 +214,7 @@ class PaperEngine:
         s["trades"].append(trade)
         del s["positions"][p["id"]]
         s["orders"][p["id"]]["status"]="CLOSED"
+        self._update_plan_order(s,s['orders'][p['id']])
         s["loss_streak"]=s["loss_streak"]+1 if trade["net"]<0 else 0
         if s["loss_streak"]>=self.limits.consecutive_losses:
             s["cooldown_until"]=(ts+timedelta(seconds=self.limits.cooldown_seconds)).isoformat()
@@ -158,6 +258,7 @@ class PaperEngine:
                             o["status"]="REJECTED" if expired else "CANCELLED"
                             o["message"]="Expired signal" if expired else "Missing candles before next open"
                             o["reserved_risk"]=0.
+                            self._update_plan_order(s,o)
                     s.setdefault("liquidity",{}).pop(b.symbol,None)
                     self.ledger.audit(b.ts,"data_gap",{"symbol":b.symbol,"previous_close":previous,
                                                         "next_open":b.ts.isoformat(),"entries_cancelled":True})
@@ -170,6 +271,7 @@ class PaperEngine:
                 if b is not None and o["status"]=="NEW":
                     if sources[b.symbol]!=o.get("source",b.source):
                         o["status"]="REJECTED";o["message"]="Data source changed";o["reserved_risk"]=0.
+                        self._update_plan_order(s,o)
                     elif b.ts>=datetime.fromisoformat(o["signal_ts"]): self._fill(s,o,b)
             for b in bars:
                 # Stops first when both barriers touched; gaps stop at worse open.
@@ -210,6 +312,7 @@ class PaperEngine:
             decisions.append(self.strategy.evaluate(history))
         self.last_decision=decisions[-1]
         if automatic:
+            self.process_plans()
             for d in decisions:
                 if d and d.side!="WAIT": self.submit(d)
         return decisions
@@ -222,5 +325,6 @@ class PaperEngine:
         """Paper liquidation at latest marks, with configured adverse exit costs."""
         with self.ledger.transaction() as s:
             for o in s["orders"].values():
-                if o["status"]=="NEW": o["status"]="CANCELLED";o["reserved_risk"]=0.
+                if o["status"]=="NEW":
+                    o["status"]="CANCELLED";o["reserved_risk"]=0.;self._update_plan_order(s,o)
             for p in list(s["positions"].values()): self._close(s,p,s["marks"][p["symbol"]],"FLATTEN",now)

@@ -9,7 +9,7 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-61 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
+78 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
 profit stop, stale data, duplicate orders, manual oversizing, conservative barriers and gaps, sell trades,
 partial IOC fill, zero liquidity, cancel, disconnect/reconnect, emergency, rollback after injected failures,
 positions/blocks across restart, revised candles, invalid values, CSV roundtrip, aggregation, reproducibility,
@@ -45,7 +45,10 @@ for execution regardless of scores. No market-quality or out-of-sample profitabi
 OHLC exits cannot resolve event order; stop-first and gap-aware rules are deliberately conservative.
 Entry liquidity is estimated from the PREVIOUS candle, avoiding future volume in an opening fill.
 Concurrency is serialized in SQLite; the desktop processes events on its main thread.
-Large backtests currently run synchronously from the UI; the CLI is preferable for long studies.
+Backtests, ML, data downloads and research run on daemon workers; Tk callbacks stay on the main thread.
+The portable self-test covers forms, catalog-to-replay preparation, plan arming/cancellation, backup/restore,
+background callbacks and embedded SQLite. Public real-data PETR4/VALE3 studies were also executed;
+all evidence/calibration gates failed and no model was promoted. See UPGRADE_6_STEPS.md.
 
 Required future operational validation: licensed B3 historical data, official contract/calendar checks,
 scenario coverage for auctions/halts, larger portfolios, stress testing, dependency audit, and broker sandbox.
