@@ -100,3 +100,29 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
         Path(screenshot).parent.mkdir(parents=True,exist_ok=True);image.save(screenshot)
     print('GUI_OK: readable inputs/selections/buttons in both themes, risk form, calendar, UI backtest, suggestions intraday/swing, saved plan, multi-CSV catalog, replay cutoff, export, chart, theme, emergency')
     d.close()
+
+# A seconds demo survives restart and chart interactions never submit orders.
+with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+    d=Dashboard(tmp);d.root.withdraw();d.auto.set(False)
+    d.load_synthetic(seconds=1)
+    assert tuple(d._period_seconds.values())[:5]==(1,5,10,15,30)
+    assert d.timeframe.get()=='1 s'
+    for _ in range(40):d.step()
+    assert all(b.seconds==1 for b in d.bars) and not d.ledger.read()['orders']
+    from trading_assistant.v2.learning import digest
+    before=digest(d.ledger.read())
+    for _ in range(12):d.zoom(.85);d.zoom(1.2)
+    d.timeframe.set('15 s');d.change_period()
+    deadline=time.monotonic()+2
+    while (d._chart_after or d._chart_quality_after) and time.monotonic()<deadline:
+        d.root.update();time.sleep(.005)
+    assert d._chart_after is None and d._chart_quality_after is None
+    assert digest(d.ledger.read())==before
+    original_feed=d.feed.copy();d.close()
+    d=Dashboard(tmp);d.root.withdraw()
+    assert d.feed==original_feed and d.cursor==40 and d.timeframe.get()=='1 s'
+    assert all(b.seconds==1 for b in d.bars)
+    d.load_synthetic()
+    assert d.feed[0].ts.second==0 and d.timeframe.get()=='1 min'
+    d.close()
+    print('GUI_SECONDS_OK: closed1s demo, 5/10/15/30s views, queued zoom, unchanged ledger, restart and aligned new demo')

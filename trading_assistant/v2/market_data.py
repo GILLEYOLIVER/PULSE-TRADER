@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .data import CSVProvider, export_csv
+from .data import CSVProvider, export_csv, aggregate
 from .models import Bar, UTC, aware
 from .session import SAO_PAULO
 from .suggestions import merge_series, history_digest
@@ -99,6 +99,17 @@ def fetch_market(symbol, seconds=86400, *, provider='brapi', window='2y', now=No
         raise ValueError('Código de ativo inválido')
     now = aware(now or datetime.now(UTC))
     if provider=='binance':
+        if seconds in (1,5,10,15,30):
+            if window!='1h':raise ValueError('Gráficos em segundos: selecione a última hora (1h)')
+            end=datetime.fromtimestamp(int(now.timestamp())//seconds*seconds,UTC)
+            base=fetch_binance(symbol,1,start=end-timedelta(hours=1),end=end,getter=getter)
+            bars=aggregate(base.bars,seconds)
+            if not bars:raise DataUnavailable('Sem candles completos para o período em segundos')
+            return MarketSnapshot(bars,{**base.provenance,'seconds':seconds,'candles':len(bars),
+                'sha256':history_digest(bars),'base_seconds':1,'base_candles':len(base.bars),
+                'base_sha256':base.provenance['sha256'],'expected_candles':3600//seconds,
+                'requested_window':'1h','aggregation':'complete contiguous UTC buckets from native1s; no interpolation',
+                'last_closed_at':(bars[-1].ts+timedelta(seconds=seconds)).isoformat()})
         days={'5d':5,'1mo':30,'3mo':90,'1y':365,'2y':730,'5y':1825}
         if window not in days:raise ValueError('Binance: use um intervalo de 5d a 5y')
         return fetch_binance(symbol,seconds,start=now-timedelta(days=days[window]),end=now,getter=getter)
@@ -147,9 +158,9 @@ def fetch_market(symbol, seconds=86400, *, provider='brapi', window='2y', now=No
 
 def fetch_binance(symbol,seconds,*,start,end,getter=json_response,allow_gaps=False):
     """Public spot-only OHLC + closed-candle activity; no account/order URLs."""
-    intervals={60:'1m',300:'5m',900:'15m',1800:'30m',3600:'1h',86400:'1d'}
+    intervals={1:'1s',60:'1m',300:'5m',900:'15m',1800:'30m',3600:'1h',86400:'1d'}
     if symbol not in ('BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT') or seconds not in intervals:
-        raise ValueError('Binance: BTCUSDT/ETHUSDT/BNBUSDT/SOLUSDT, 1m/5m/15m/30m/1h/diário; valores em USDT')
+        raise ValueError('Binance: BTCUSDT/ETHUSDT/BNBUSDT/SOLUSDT, 1s/1m/5m/15m/30m/1h/diário; valores em USDT')
     if type(allow_gaps) is not bool:raise ValueError('Gap handling must be explicit')
     start,end=aware(start),aware(end)
     step=seconds*1000
