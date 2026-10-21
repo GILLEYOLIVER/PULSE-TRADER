@@ -9,11 +9,15 @@
 | Risco | Valores financeiros por contrato, custos, limites persistentes, exposição, margem e emergência | Margens/tarifas informadas pelo usuário; gaps podem exceder stops |
 | Paper | Ordens únicas, estados, fills parciais IOC, custos, latência, stops e recuperação | Liquidez aproximada; não simula fila/leilão |
 | Rico/Profit | Pesquisa oficial e interface bloqueada com testes | Falta licença, SDK, confirmação da Rico e sandbox |
-| Dashboard | Canvas, candles, volume, EMA, zoom, timeframes, temas, configurações, resultados | Tk fallback testado; CustomTkinter indisponível no ambiente |
+| Dashboard | Canvas, candles, volume, EMA, zoom, timeframes, temas, configurações, resultados | Tk e CustomTkinter/Pillow passaram no smoke local; revisão visual completa pendente |
 | Backtest | Reprodutível, hash, custos, gaps, equity, regimes, baseline, walk-forward e sensibilidade | Um ativo por vez; resultados sintéticos não são evidência de mercado |
 | Qualidade | Suíte unitária/integração, falhas injetadas e smoke da interface | Mais homologação operacional necessária antes de qualquer integração real |
 | Windows | Inicialização, instalação venv, diagnóstico, variáveis de ambiente | `.exe` avaliado e adiado por falta de dependências/rede |
-| GitHub | Commits na branch de desenvolvimento e PR sem merge, conforme disponibilidade | Ver relatório de entrega para os identificadores efetivamente criados |
+| GitHub | PR #1 integrado a `main` por solicitação do usuário; continuação na branch de desenvolvimento | Nova revisão necessária antes de outro merge |
+
+Complemento 2.0.2: calendário de sessão fornecido e conferido pelo usuário na UI/CLI/backtest,
+validação de origem/duração de CSV, contagens inteiras, séries de ML compatíveis e quantidade idempotente.
+O calendário oficial continua dependente de fonte autorizada e conferência externa.
 
 Complemento 2.0.1: controles simples de risco e estratégia na interface, com JSON avançado preservado;
 ordens pendentes canceladas ao detectar lacunas de dados, sem interromper saídas protetivas simuladas.
@@ -21,6 +25,7 @@ ordens pendentes canceladas ao detectar lacunas de dados, sem interromper saída
 Decisões: preservar código anterior, isolar o domínio novo, eliminar caminhos de execução que ignorem risco,
 não instalar serviços pagos, usar SQLite transacional e dependências opcionais.
 
-Melhorias futuras: feed oficial, registro completo dos contratos e calendário B3, portfólio sincronizado,
+Backtest de portfólio sincronizado concluído para séries completas de mesmo intervalo.
+Melhorias futuras: feed oficial, registro completo dos contratos e calendário B3,
 validação fora da amostra em histórico licenciado, desempenho estatístico com intervalos de confiança,
 interface configurável por formulários e empacotamento assinado. Nenhuma dessas etapas habilita REAL nesta versão.

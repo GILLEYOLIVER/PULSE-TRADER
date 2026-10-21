@@ -9,7 +9,7 @@ Requer Python 3.11+ com Tcl/Tk. Na pasta do projeto:
 
 ### Abrir com F5 no VS Code
 
-Abra **esta pasta `pulse`** no VS Code (Arquivo > Abrir Pasta), instale as extensões
+Abra **esta pasta `PR-TR`** no VS Code (Arquivo > Abrir Pasta), instale as extensões
 Python e Python Debugger quando o VS Code oferecer e pressione **F5**. A configuração
 `PULSE-TRADER (PAPER)` abre `main.py` com a pasta correta de trabalho, para manter o
 estado simulado em `runtime/` dentro deste projeto. Se o ambiente `.venv` ainda não
@@ -24,7 +24,7 @@ python main.py
 ```
 
 O núcleo, os gráficos Canvas, o replay, o simulador e o backtest usam a biblioteca padrão.
-CustomTkinter é usado como janela quando instalado; Tkinter é o fallback testado.
+CustomTkinter é usado como janela quando instalado; Tkinter é o fallback. Ambos foram testados no Windows.
 Pillow, incluído em `install.ps1 -Full`, desenha candles e médias móveis em resolução
 dobrada com antialiasing. Sem ele, as médias também são suavizadas pelo renderizador
 interno e o Canvas do Tkinter continua disponível.
@@ -35,11 +35,13 @@ Para ambiente virtual e bibliotecas opcionais da interface anterior:
 
 ```powershell
 .\scripts\install.ps1
+.\scripts\install.ps1 -Ui   # apenas CustomTkinter e Pillow
 .\scripts\install.ps1 -Full
 .\scripts\start.ps1
 ```
 
-Não é preciso instalar bibliotecas extras para testar a versão nova. A opção `-Full` precisa de internet.
+Não é preciso instalar bibliotecas extras para testar a versão nova. `-Ui` instala apenas as bibliotecas
+da interface; `-Full` instala também as dependências opcionais legadas. Ambas precisam de internet.
 `PULSE_DATA_DIR` define a pasta dos bancos locais (padrão `runtime`). `.env.example` é uma referência;
 o programa lê variáveis do processo, sem carregar `.env` automaticamente.
 
@@ -61,6 +63,11 @@ o programa lê variáveis do processo, sem carregar `.env` automaticamente.
    **Ordens e resultados > Treinar modelo com CSV**. O arquivo JSON resultante
    mostra acerto em validação e teste, comparado com referências simples; ele
    não envia ordens, não garante rentabilidade e não é ativado automaticamente.
+9. Em **Sugestões**, escolha **No dia** ou **Dias e semanas**. Use **Adicionar CSVs** para
+   comparar vários ativos, **Usar replay atual** para analisar somente candles já processados ou
+   **Exemplo simulado** para conhecer a tela. Setas e cores mostram alta, baixa ou lateralização;
+   selecione o ativo para ler o motivo, a condição de entrada, stop e alvo.
+   **Guardar plano PAPER** salva uma proposta sem criar uma ordem. [Guia das sugestões](docs/SUGGESTIONS.md).
 
 O gráfico mostra candles, volume, EMA9/EMA21 e níveis das posições; há zoom, navegação,
 períodos de **1, 5 e 15 minutos** quando os dados de origem permitem, e temas claro/escuro.
@@ -79,8 +86,11 @@ WIN,2026-01-05T12:00:00+00:00,130000,130050,129980,130020,1000,USER_LICENSED_EXP
 
 Informe a origem verdadeira e use somente dados que você tem autorização para utilizar.
 O timestamp representa a abertura de um candle **já encerrado**. Fuso é obrigatório.
-Valores inválidos, duplicatas e períodos sobrepostos são rejeitados. A agregação omite buckets incompletos.
-Use uma série por ativo por execução de backtest. Na UI, a troca de série exige posições encerradas;
+Valores inválidos, duplicatas, períodos sobrepostos e mistura de origem ou duração para o mesmo ativo
+são rejeitados. A agregação omite buckets incompletos.
+O backtest aceita vários ativos em um CSV quando há exatamente um candle de cada ativo em cada intervalo sincronizado.
+As entradas usam as aberturas de todos os ativos antes de qualquer máxima, mínima ou fechamento do intervalo.
+Walk-forward, sensibilidade, treino e UI continuam com uma série por execução. Na UI, a troca de série exige posições encerradas;
 o mesmo ledger não pode voltar no tempo. Para um experimento independente, escolha outro `PULSE_DATA_DIR`
 sem apagar o estado anterior. Nunca use isso para representar limites de uma conta real.
 
@@ -102,6 +112,21 @@ python -m unittest discover -s tests -v
 python -m scripts.smoke_gui
 ```
 
+### Calendário de sessão opcional
+
+Para bloquear entradas fora de horários e feriados que você conferiu, salve um JSON como este:
+
+```json
+{"holidays":["2026-01-01"],"start":"09:00:00","end":"18:00:00","verified":true}
+```
+
+No backtest, acrescente `--calendar-json caminho-do-arquivo.json`. Na interface, coloque o mesmo objeto
+em `calendar` no JSON avançado e aplique a configuração. `verified` registra sua conferência da lista;
+o programa não consulta nem certifica o calendário oficial da B3. Com `calendar: null`, o calendário
+opcional não é aplicado. Com `verified: false`, novas entradas de ativos B3 são bloqueadas. Saídas
+protetivas PAPER continuam no replay, mesmo fora da sessão. Datas e horários são de São Paulo.
+Não altere o calendário enquanto houver posição ou ordem pendente.
+
 Estratégias: tendência, rompimento e pullback. A análise usa EMA/SMA, RSI, MACD, ATR, VWAP de sessão,
 Bollinger, suportes/resistências, momentum, volume relativo, consolidação e volatilidade.
 O filtro multitemporal é opcional na configuração da estratégia.
@@ -112,6 +137,7 @@ Não há confiança estatística calibrada: o campo fica indisponível, sem porc
 O tamanho considera valor por ponto, lote, stop, custos, margem simulada, exposição e saldo.
 Não força um contrato quando o orçamento é insuficiente. Limites diário/semanal/mensal, meta,
 quantidade de operações, posições, ativos, estratégias, horário, spread, slippage e cooldown são configuráveis.
+Quantidades de contratos, operações, horas e latência devem ser números inteiros.
 As decisões, fills, posições, cancelamentos e bloqueios são gravados em transações SQLite.
 Entradas são no próximo candle, com latência configurável e liquidez estimada pelo **volume anterior**.
 Quando faltam candles por mais tempo que o limite de idade dos dados, ordens pendentes daquele ativo
@@ -124,11 +150,10 @@ se stop e alvo forem tocados no mesmo candle, considera stop primeiro. Trailing 
 
 - Rico/Profit: fronteira bloqueada; falta confirmar habilitação, licença, SDK e ambiente autorizado.
 - Sem feed B3 em tempo real, calendário oficial carregado, rolagem automática, leilões ou simulação de fila.
-- Backtest por um ativo; portfólio multativo sincronizado ainda não implementado.
+- Backtest de portfólio exige candles sincronizados e completos para todos os ativos; não simula horários de negociação distintos.
 - Taxas/margens são entradas de simulação, sem tributação ou ajuste diário completo de futuros.
 - ML opcional simples, com validação temporal e baselines; não foi validado para operar mercados.
-- Bibliotecas gráficas extras e empacotamento `.exe` não puderam ser instalados neste ambiente sem DNS.
-- Interface Tk foi exercitada no Windows; o caminho CustomTkinter requer validação com a dependência instalada.
+- CustomTkinter e Pillow foram exercitados no ambiente virtual local; empacotamento `.exe` e distribuição externa ainda não foram validados.
 - Módulos anteriores permanecem para estudo, notícias e compatibilidade. Seu roteador de ordens foi desativado
   para impedir que contornem o ledger novo. A entrada `python -m trading_assistant` abre a versão nova.
 

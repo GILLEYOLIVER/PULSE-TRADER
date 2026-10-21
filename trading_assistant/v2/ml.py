@@ -17,7 +17,9 @@ def sigmoid(z): return 1/(1+math.exp(-max(-30.,min(30.,z))))
 
 def train_temporal(bars,path,horizon=1):
     """Optional small logistic model. Train-only scaling, purged temporal splits; no execution authority."""
-    if len(bars)<200 or horizon<1 or len({b.symbol for b in bars})!=1: raise ValueError("At least 200 single-symbol bars required")
+    if (len(bars)<200 or horizon<1 or len({b.symbol for b in bars})!=1
+        or len({(b.source,b.seconds) for b in bars})!=1):
+        raise ValueError("At least 200 bars from one symbol, source and timeframe required")
     if any(b.ts<=a.ts for a,b in zip(bars,bars[1:])): raise ValueError("History must be chronological")
     n=len(bars);cut1=int(n*.6);cut2=int(n*.8)
     datasets=[]
@@ -54,8 +56,8 @@ def train_temporal(bars,path,horizon=1):
 def predict(model,bars):
     copy=dict(model);digest=copy.pop("sha256")
     if hashlib.sha256(json.dumps(copy,sort_keys=True).encode()).hexdigest()!=digest: raise ValueError("Model checksum mismatch")
-    if (bars[-1].ts.isoformat()<=model["train_end"] or bars[-1].symbol!=model["symbol"]
-        or bars[-1].source!=model["source"] or bars[-1].seconds!=model["seconds"]):
+    if (bars[-1].ts.isoformat()<=model["train_end"]
+        or any(b.symbol!=model["symbol"] or b.source!=model["source"] or b.seconds!=model["seconds"] for b in bars)):
         raise ValueError("Inference requires later compatible data")
     x=features(bars);scaled=[(v-m)/s for v,m,s in zip(x,model["means"],model["stds"])]+[1.]
     score=sigmoid(sum(w*v for w,v in zip(model["weights"],scaled)))

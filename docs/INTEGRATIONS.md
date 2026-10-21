@@ -12,12 +12,16 @@ A documentação oficial da Nelogica descreve ProfitDLL para Market Data e um mo
 com roteamento, cancelamento e consultas. Requer licença e habilitação da conta na corretora.
 A presença desse produto não confirma o direito de uma conta Rico específica usá-lo.
 Não foi encontrada confirmação suficiente de uma API pública direta da Rico para este projeto.
+A Nelogica informa que o pacote e manual da ProfitDLL são obtidos após contratação pela área logada.
+Sua documentação também diz que contas Rico não podem ser incluídas em licenças de teste do Profit;
+isso não demonstra incompatibilidade com uma licença comercial ProfitDLL, que continua sem confirmação.
 
 Fontes primárias:
 
 - [Introdução ao Produto DLL Real Time](https://ajuda.nelogica.com.br/hc/pt-br/articles/11166353435035-Introdu%C3%A7%C3%A3o-ao-Produto-DLL-Real-Time)
 - [Ecossistema ProfitDLL e primeiros passos](https://ajuda.nelogica.com.br/hc/pt-br/articles/22396517026203-Ecossistema-ProfitDLL-e-primeiros-passos)
 - [Como obter acesso à ProfitDLL](https://ajuda.nelogica.com.br/hc/pt-br/articles/51583791325211-Como-obter-acesso-%C3%A0-ProfitDLL)
+- [Conta Rico em licença de teste do Profit](https://ajuda.nelogica.com.br/hc/pt-br/articles/360044286392-Como-integrar-minha-corretora-na-licen%C3%A7a-de-teste-do-Profit)
 - [Módulo de Automação de Estratégias](https://ajuda.nelogica.com.br/hc/pt-br/articles/18501196212251-Conhe%C3%A7a-o-m%C3%B3dulo-de-Automa%C3%A7%C3%A3o-de-Estrat%C3%A9gias)
 
 A automação nativa do Profit utiliza estratégias NTSL. Não executa Python diretamente.

@@ -1,14 +1,23 @@
 from __future__ import annotations
+import math
+from dataclasses import dataclass
 from datetime import timedelta
 from .models import Bar,Decision,aware
 from .indicators import snapshot
 from .data import aggregate
 
+@dataclass(frozen=True)
 class Strategy:
-    def __init__(self,name="trend",reward_r=2.,stop_atr=1.5,multi_timeframe=False):
-        if name not in ("trend","breakout","pullback"): raise ValueError("Unknown strategy")
-        if reward_r<=0 or stop_atr<=0: raise ValueError("Invalid strategy parameters")
-        self.name,self.reward_r,self.stop_atr,self.multi_timeframe=name,reward_r,stop_atr,multi_timeframe
+    name: str = "trend"
+    reward_r: float = 2.
+    stop_atr: float = 1.5
+    multi_timeframe: bool = False
+
+    def __post_init__(self):
+        if self.name not in ("trend","breakout","pullback"): raise ValueError("Unknown strategy")
+        if not math.isfinite(self.reward_r) or not math.isfinite(self.stop_atr) or self.reward_r<=0 or self.stop_atr<=0:
+            raise ValueError("Invalid strategy parameters")
+        if type(self.multi_timeframe) is not bool: raise ValueError("Multi-timeframe must be boolean")
 
     def evaluate(self,bars: list[Bar]) -> Decision | None:
         if len(bars)<35: return None
