@@ -9,7 +9,10 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-119 tests passed without skips. Research-cycle coverage includes weighted operation accuracy,
+131 tests passed without skips. Trade-outcome coverage includes realized-label availability,
+teacher feature capture without execution changes, deterministic fitting, source/time/parameter compatibility,
+model integrity, history-only context, common validation folds and all-or-nothing invalid batch rejection.
+Research-cycle coverage includes weighted operation accuracy,
 small-sample uncertainty, strict goal evidence, isolated historical windows, immutable versions,
 frozen source workspaces, complete runtime archives, cost-stress promotion gates, causal filters,
 bounded mean-reversion stops, legacy exposure compatibility, explicit candle gaps and metrics-only replay equivalence.

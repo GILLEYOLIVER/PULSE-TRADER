@@ -30,7 +30,13 @@ class LearningMemory:
         return records
 
     def append(self,kind,payload):
+        return self.append_batch(kind,[payload])[0]
+
+    def append_batch(self,kind,payloads):
         if kind not in ('TRAIN','VALIDATION','BLIND_TEST','SEALED_POLICY'):raise ValueError('Tipo de experiência desconhecido')
+        payloads=list(payloads)
+        if not payloads:return []
+        if len(payloads)>1000:raise ValueError('Lote de aprendizado acima do limite')
         path=self.evaluation_path if kind=='BLIND_TEST' else self.training_path
         lock=self.directory/'memory.lock'
         try:descriptor=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
@@ -38,13 +44,18 @@ class LearningMemory:
         try:
             os.close(descriptor)
             records=self._read(path)
-            record={'schema':1,'sequence':len(records)+1,'previous':records[-1]['sha256'] if records else '0'*64,
-                'kind':kind,'recorded_at':datetime.now(timezone.utc).isoformat(),'payload':payload}
-            record['sha256']=digest(record)
-            raw=(json.dumps(record,ensure_ascii=False,allow_nan=False)+'\n').encode('utf-8')
-            if len(raw)>1_000_000:raise ValueError('Grave métricas e caminhos, não todo o histórico dentro da memória')
-            with path.open('ab') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
-            return record
+            previous=records[-1]['sha256'] if records else '0'*64
+            batch=[];lines=[]
+            for index,payload in enumerate(payloads,1):
+                record={'schema':1,'sequence':len(records)+index,'previous':previous,
+                    'kind':kind,'recorded_at':datetime.now(timezone.utc).isoformat(),'payload':payload}
+                record['sha256']=digest(record)
+                raw=(json.dumps(record,ensure_ascii=False,allow_nan=False)+'\n').encode('utf-8')
+                if len(raw)>1_000_000:raise ValueError('Grave métricas e caminhos, não todo o histórico dentro da memória')
+                batch.append(record);lines.append(raw);previous=record['sha256']
+            if sum(map(len,lines))>32_000_000:raise ValueError('Lote de aprendizado acima do limite de bytes')
+            with path.open('ab') as stream:stream.write(b''.join(lines));stream.flush();os.fsync(stream.fileno())
+            return batch
         finally:lock.unlink()
 
     def training_records(self):

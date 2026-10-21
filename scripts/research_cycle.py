@@ -17,9 +17,10 @@ from trading_assistant.v2.blind_testing import blind_replay
 from trading_assistant.v2.learning import HistoricalRotation,LearningMemory,digest
 from trading_assistant.v2.models import UTC,Instrument
 from trading_assistant.v2.research import (ChampionStore,aggregate_metrics,atomic_json,candidate_bank,
-    development_result,goal_evidence,plan_forward,promotion_decision,select_development)
+    development_result,development_slices,goal_evidence,plan_forward,promotion_decision,select_development,warmup_start)
 from trading_assistant.v2.strategy import Strategy
 from trading_assistant.v2.suggestions import history_digest
+from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model)
 
 
 METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
@@ -40,14 +41,61 @@ def research_assumptions(symbol):
 
 
 def development_task(task):
-    bars,parameters=task;limits,costs,specs=research_assumptions(bars[0].symbol)
-    n=len(bars);cuts=[int(n*.5),int(n*2/3),int(n*5/6),n];reports=[]
-    for lo,hi in zip(cuts,cuts[1:]):
+    bars,parameters,after=task;limits,costs,specs=research_assumptions(bars[0].symbol)
+    reports=[]
+    for lo,hi in development_slices(bars,after):
         report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-250):lo],
             strategy=Strategy(**parameters),limits=limits,costs=costs,instruments=specs,
             retain_trace=False,bootstrap=False)
         reports.append(report)
     return development_result(parameters,reports)
+
+
+def fit_entry_filter(bars,parameters,directory,cutoff):
+    base=base_parameters(parameters);strategy=Strategy(**base)
+    limits,costs,specs=research_assumptions(bars[0].symbol)
+    samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs)
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    atomic_json(directory/'labels.json',{'samples':samples,'teacher':diagnostics,'cutoff':cutoff.isoformat()})
+    model=fit_trade_model(samples,parameters=asdict(strategy),symbol=bars[0].symbol,seconds=bars[0].seconds,
+        source=bars[0].source,cutoff=cutoff,costs=costs,instrument=specs[bars[0].symbol],dataset_sha256=history_digest(bars))
+    atomic_json(directory/'model.json',model)
+    return model,diagnostics
+
+
+def learned_development_task(task):
+    bars,parameters,after,directory=task;thresholds=(.55,.65,.8,.9)
+    reports={threshold:[] for threshold in thresholds};training=[]
+    base=base_parameters(parameters);limits,costs,specs=research_assumptions(bars[0].symbol)
+    for index,(lo,hi) in enumerate(development_slices(bars,after),1):
+        try:model,diagnostics=fit_entry_filter(bars[:lo],base,Path(directory)/f'fold-{index}',bars[lo].ts)
+        except InsufficientTradeData as error:
+            result=[]
+            for threshold in thresholds:
+                row=development_result(base,[]);row.update(learning={'threshold':threshold,'kind':'trade_outcome_logistic'},
+                    training_status='INSUFFICIENT_RESOLVED_TRADES',detail=str(error),training=training)
+                result.append(row)
+            return result
+        training.append({'fold':index,'model_sha256':model['sha256'],'cutoff':model['training_cutoff'],
+            'training_samples':model['training_samples'],'teacher':diagnostics})
+        for threshold in thresholds:
+            strategy=Strategy(**base,trade_filter=model,trade_score_threshold=threshold)
+            report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-250):lo],strategy=strategy,
+                limits=limits,costs=costs,instruments=specs,retain_trace=False,bootstrap=False)
+            reports[threshold].append(report)
+    result=[]
+    for threshold in thresholds:
+        row=development_result(base,reports[threshold]);row.update(learning={'threshold':threshold,'kind':'trade_outcome_logistic'},
+            training_status='TEMPORAL_FOLDS_EVALUATED',training=training)
+        result.append(row)
+    return result
+
+
+def materialize_candidate(winner,training,directory,cutoff):
+    if not winner.get('learning'):return asdict(Strategy(**winner['parameters']))
+    model,_=fit_entry_filter(training,winner['parameters'],Path(directory)/'trade-models'/'final',cutoff)
+    return asdict(Strategy(**base_parameters(winner['parameters']),trade_filter=model,
+        trade_score_threshold=winner['learning']['threshold']))
 
 
 def external_run(bars,warmup,parameters,group,output,name,*,stress=False):
@@ -87,7 +135,7 @@ def write_report(output,summary):
 
 def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     symbol,seconds_text=group.split(':');seconds=int(seconds_text)
-    train_days=21 if seconds==300 else 60 if seconds==3600 else 365 if symbol in ('BTCUSDT','ETHUSDT') else 1460
+    train_days=30 if seconds==300 else 365 if seconds==3600 else 365 if symbol in ('BTCUSDT','ETHUSDT') else 1460
     test_days=7 if seconds==300 else 21 if seconds==3600 else 90
     try:
         window=plan_forward(rotation,symbol,seconds,as_of=datetime.now(UTC),test_days=test_days,
@@ -96,7 +144,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     limits,costs,specs=research_assumptions(symbol)
     settings={'limits':asdict(limits),'costs':asdict(costs),'instruments':{k:asdict(v) for k,v in specs.items()}}
     previous=state['groups'].get(group,{})
-    parameters=store.version(previous['champion'])['parameters'] if previous.get('champion') else asdict(Strategy())
+    parameters=asdict(Strategy(**store.version(previous['champion'])['parameters'])) if previous.get('champion') else asdict(Strategy())
     reference_id=store.register(group,parameters,code_id,settings)
     if previous.get('champion') and store.version(previous['champion'])['code_id']!=code_id:
         # Old source remains archived; do not count new-code results as old-version confirmations.
@@ -105,6 +153,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     if not previous.get('champion'):
         store.set_champion(state,group,reference_id,'INITIAL_REFERENCE');store.save(state)
     count=previous.get('cycles',0)
+    development_after=(parameters.get('trade_filter') or {}).get('training_cutoff')
     bank=candidate_bank(count,parameters,args.candidates)
     plan={'cycle_id':cycle_id,'group':group,'windows':window,'code_id':code_id,
         'reference_id':reference_id,'rebased_from':rebased_from,'candidate_parameters':bank,
@@ -112,6 +161,11 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'goal':'same version; >=3 distinct real windows; >=100 trades total; >90% each; positive net and double-cost stress',
         'promotion':'preselected challenger only; >=10 external trades; better net and nonworse accuracy than reference; positive double-cost net; drawdown <=10%',
         'desktop_adoption':False}
+    plan['required_external_warmup_bars']=250
+    plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
+        'minimum_resolved_training_trades':100,'minimum_each_net_outcome':20,
+        'fold_models_trained_only_before_validation':'labels must already be realized',
+        'common_development_after':development_after,'score_is_calibrated_probability':False}
     group_dir=output/group.replace(':','-');group_dir.mkdir()
     atomic_json(group_dir/'protocol-before-data.json',plan)
     rotation.reserve(cycle_id,symbol,seconds,window['test_start'],window['test_end'])
@@ -123,52 +177,68 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     atomic_json(group_dir/'development-data.json',{'sha256':history_digest(training),'candles':len(training)})
     results=[]
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        for index,result in enumerate(pool.map(development_task,[(training,p) for p in bank]),1):
+        for index,result in enumerate(pool.map(development_task,[(training,p,development_after) for p in bank]),1):
             results.append(result)
             print(f'{group}: development {index}/{len(bank)}; trades={result["aggregate"]["trades"]}; eligible={result["eligible"]}',flush=True)
+        seeds=sorted((row for row in results if row['parameters'].get('trade_filter') is None and row['aggregate']['trades']>=30),
+            key=lambda row:tuple(row['selection_key']),reverse=True)[:2]
+        tasks=[(training,row['parameters'],development_after,group_dir/'trade-models'/digest(base_parameters(row['parameters']))) for row in seeds]
+        for index,learned in enumerate(pool.map(learned_development_task,tasks),1):
+            results.extend(learned)
+            print(f'{group}: learned base {index}/{len(seeds)}; eligible thresholds={sum(row["eligible"] for row in learned)}',flush=True)
     reference=next(row for row in results if row['parameters']==parameters)
     winner,selection=select_development(results,reference)
-    candidate_id=store.register(group,winner['parameters'],code_id,settings)
-    policy={**plan,'candidate_id':candidate_id,'selected_parameters':winner['parameters'],
+    cutoff=datetime.fromisoformat(window['test_start']).replace(tzinfo=UTC)
+    selected_parameters=materialize_candidate(winner,training,group_dir,cutoff)
+    candidate_id=store.register(group,selected_parameters,code_id,settings)
+    policy={**plan,'candidate_id':candidate_id,'selected_parameters':selected_parameters,
         'selection_status':selection,'development_sha256':history_digest(training),'selected_development':winner}
     policy['sha256']=digest(policy)
     # Immutable choice before the holdout is fetched. Both retained and rejected configurations are saved.
     atomic_json(group_dir/'frozen-policy.json',policy)
     atomic_json(group_dir/'development-matrix.json',results)
-    for row in results:memory.append('VALIDATION',{'profile':group,'cycle_id':cycle_id,**row})
-    memory.append('SEALED_POLICY',{'profile':group,'cycle_id':cycle_id,'winner':{'parameters':winner['parameters'],
+    memory.append_batch('VALIDATION',[{'profile':group,'cycle_id':cycle_id,**row} for row in results])
+    memory.append('SEALED_POLICY',{'profile':group,'cycle_id':cycle_id,'winner':{'parameters':selected_parameters,
         'risk_profile':'fixed_conservative'},'policy_sha256':policy['sha256'],'candidate_id':candidate_id})
     with (group_dir/'COMPARACAO.csv').open('w',encoding='utf-8-sig',newline='') as stream:
-        writer=csv.writer(stream,delimiter=';');writer.writerow(('parameters','eligible','trades','wins','win_rate','net_USDT','drawdown_USDT'))
+        writer=csv.writer(stream,delimiter=';');writer.writerow(('parameters','learning','eligible','trades','wins','win_rate','net_USDT','drawdown_USDT'))
         for row in results:
-            m=row['aggregate'];writer.writerow((json.dumps(row['parameters']),row['eligible'],m['trades'],m['wins'],m['win_rate'],m['net'],m['max_window_drawdown']))
+            m=row['aggregate'];writer.writerow((json.dumps(row['parameters']),json.dumps(row.get('learning')),row['eligible'],m['trades'],m['wins'],m['win_rate'],m['net'],m['max_window_drawdown']))
     start=datetime.fromisoformat(window['test_start']).replace(tzinfo=UTC)
-    warmup_start=(start-timedelta(days=250 if seconds==86400 else 1)).date().isoformat()
-    full=get_data(symbol,seconds,warmup_start,window['test_end'],group_dir,allow_gaps=True)
+    context_start=warmup_start(start,seconds)
+    full=get_data(symbol,seconds,context_start,window['test_end'],group_dir,allow_gaps=True)
     warmup=[b for b in full if b.ts<start][-250:];testing=[b for b in full if b.ts>=start]
-    c=external_run(testing,warmup,winner['parameters'],group,group_dir,'candidate')
+    if len(warmup)<250:raise ValueError('Contexto anterior insuficiente; a avaliação não começa consumindo candles do teste como aquecimento')
+    c=external_run(testing,warmup,selected_parameters,group,group_dir,'candidate')
     r=c if candidate_id==reference_id else external_run(testing,warmup,parameters,group,group_dir,'reference')
-    s=external_run(testing,warmup,winner['parameters'],group,group_dir,'double-costs',stress=True)
+    s=external_run(testing,warmup,selected_parameters,group,group_dir,'double-costs',stress=True)
+    rs=s if candidate_id==reference_id else external_run(testing,warmup,parameters,group,group_dir,'reference-double-costs',stress=True)
     promotion=promotion_decision(winner,c,r,s)
     if candidate_id==reference_id:promotion={'promoted':False,'reasons':['reference_already_selected']}
-    confirmation={'group':group,'version_id':candidate_id,'start':window['test_start'],'end':window['test_end'],
-        'cycle_id':cycle_id,'real_history':all(b.source=='BINANCE_SPOT_USDT' for b in testing),
-        'passed':all(x['passed'] for x in (c,r,s)),'metrics':c['metrics'],'stress_net':s['metrics']['net'],
-        'stress_drawdown':s['metrics']['max_drawdown'],'dataset_sha256':history_digest(testing)}
-    evidence=goal_evidence([row for row in state['evaluations'] if row['version_id']==candidate_id]+[confirmation])
+    confirmations=[]
+    for version,report,stress,role in ((candidate_id,c,s,'candidate'),(reference_id,r,rs,'reference')):
+        if any(row['version_id']==version for row in confirmations):continue
+        confirmations.append({'group':group,'version_id':version,'start':window['test_start'],'end':window['test_end'],
+            'cycle_id':cycle_id,'role':role,'real_history':all(b.source=='BINANCE_SPOT_USDT' for b in testing),
+            'warmup_bars':len(warmup),'qualified_for_goal':len(warmup)>=250,
+            'passed':all(x['passed'] for x in (report,stress)),'metrics':report['metrics'],'stress_net':stress['metrics']['net'],
+            'stress_drawdown':stress['metrics']['max_drawdown'],'dataset_sha256':history_digest(testing)})
+    active_version=candidate_id if promotion['promoted'] else reference_id
+    evidence=goal_evidence([row for row in state['evaluations']+confirmations if row['version_id']==active_version])
     row={'group':group,'status':'COMPLETED','reference_id':reference_id,'candidate_id':candidate_id,
         'selection':selection,'development':winner,'external':c,'reference_external':r,'double_costs':s,
-        'promotion':promotion,'goal':evidence,'decision':'PROMOVIDA NA PESQUISA' if promotion['promoted'] else 'REFERÊNCIA PRESERVADA'}
+        'reference_double_costs':rs,'promotion':promotion,'goal':evidence,'development_candidates':len(results),
+        'decision':'PROMOVIDA NA PESQUISA' if promotion['promoted'] else 'REFERÊNCIA PRESERVADA'}
     atomic_json(group_dir/'result.json',row)
     row['runtime_archive']=store.archive_run(group_dir)
     # Commit the research reference only after its complete data/report bundle was preserved.
     if promotion['promoted']:store.set_champion(state,group,candidate_id,'VALIDATION_AND_EXTERNAL_GATE_PASSED')
     elif rebased_from:store.set_champion(state,group,reference_id,'REFERENCE_PARAMETERS_REEVALUATED_ON_NEW_CODE')
-    state['evaluations'].append(confirmation)
+    state['evaluations'].extend(confirmations)
     state['groups'][group]['cycles']=count+1
     state['groups'][group]['last_evidence']=evidence
     store.save(state)
-    memory.append('BLIND_TEST',{'profile':group,'cycle_id':cycle_id,**confirmation,'promotion':promotion})
+    memory.append_batch('BLIND_TEST',[{'profile':group,'cycle_id':cycle_id,**row,'promotion':promotion} for row in confirmations])
     print(group+': external '+describe_rate(c['metrics'])+'; '+row['decision'],flush=True)
     return row
 
@@ -190,7 +260,7 @@ def main():
             symbol,seconds=group.split(':');seconds=int(seconds)
             try:
                 window=plan_forward(rotation,symbol,seconds,as_of=datetime.now(UTC),test_days=7 if seconds==300 else 21 if seconds==3600 else 90,
-                    training_days=21 if seconds==300 else 60 if seconds==3600 else 365 if symbol in ('BTCUSDT','ETHUSDT') else 1460,
+                    training_days=30 if seconds==300 else 365 if seconds==3600 else 365 if symbol in ('BTCUSDT','ETHUSDT') else 1460,
                     after=store.state()['groups'].get(group,{}).get('last_external_end'))
                 print(json.dumps({'group':group,'windows':window}),flush=True)
             except ValueError as error:print(json.dumps({'group':group,'waiting':str(error)}),flush=True)
@@ -211,7 +281,8 @@ def main():
             cycle_id=datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')
             output=Path(args.output)/cycle_id;output.mkdir(parents=True)
             summary={'cycle_id':cycle_id,'code_id':code_id,'groups':[],'goal_reached':False,'mode':'PAPER','status':'IN_PROGRESS'}
-            atomic_json(output/'batch-before-results.json',{'groups':args.groups,'candidates_per_group':args.candidates,
+            atomic_json(output/'batch-before-results.json',{'groups':args.groups,'technical_candidates_per_group':args.candidates,
+                'maximum_trade_filter_candidates_per_group':8,
                 'workers':args.workers,'code_id':code_id,'started_at':cycle_id})
             for group in args.groups:
                 try:row=run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id)

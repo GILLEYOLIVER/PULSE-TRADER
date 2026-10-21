@@ -29,6 +29,10 @@ Há filtros de entrada por médias, direção, volume e afastamento, um candidat
 à média e testes com custos dobrados. A meta de mais de 90% ainda depende de confirmação;
 nenhuma porcentagem é garantida. A execução continua exclusivamente PAPER.
 
+O experimento de [aprendizado com operações encerradas](docs/TRADE_MODEL_PROTOCOL.md)
+usa resultados líquidos anteriores para filtrar entradas. Ele tem cortes temporais,
+amostra mínima e validação posterior; sua pontuação interna não é probabilidade de acerto.
+
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.research_cycle --plan-only
 .\.venv\Scripts\python.exe -u -m scripts.research_cycle --cycles 1 --workers 2 --candidates 36

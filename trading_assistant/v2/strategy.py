@@ -1,7 +1,7 @@
 from __future__ import annotations
 import math
 from statistics import mean
-from dataclasses import dataclass,replace
+from dataclasses import dataclass,replace,asdict
 from datetime import timedelta
 from .models import Bar,Decision,aware
 from .indicators import snapshot,ema
@@ -18,6 +18,8 @@ class Strategy:
     min_relative_volume: float = 0.
     max_entry_atr: float = 0.
     require_trend_slope: bool = False
+    trade_filter: dict | None = None
+    trade_score_threshold: float = 0.
 
     def __post_init__(self):
         if self.name not in ("trend","breakout","pullback","adaptive","sma_cross","ema_pullback","mean_reversion"): raise ValueError("Unknown strategy")
@@ -28,8 +30,25 @@ class Strategy:
         if any(type(x) not in (int,float) or not math.isfinite(x) or x<0 for x in filters) or self.min_efficiency>1:
             raise ValueError('Invalid causal entry filters')
         if type(self.require_trend_slope) is not bool:raise ValueError('Slope filter must be boolean')
+        if type(self.trade_score_threshold) not in (int,float) or not math.isfinite(self.trade_score_threshold) or not 0<=self.trade_score_threshold<=1:
+            raise ValueError('Invalid historical trade-score threshold')
+        if self.trade_filter is None and self.trade_score_threshold:raise ValueError('A historical filter requires a trained model')
+        if self.trade_filter is not None:
+            from .trade_learning import validate_trade_model
+            validate_trade_model(self.trade_filter,asdict(self))
 
     def evaluate(self,bars: list[Bar]) -> Decision | None:
+        decision=self._technical_evaluate(bars)
+        if decision is None or decision.side=='WAIT' or self.trade_filter is None:return decision
+        from .trade_learning import score_trade
+        result=score_trade(self.trade_filter,decision,bars)
+        blocked=result['abstain'] or result['score']<self.trade_score_threshold
+        return replace(decision,side='WAIT' if blocked else decision.side,
+            reason=decision.reason+'; filtro de operações anteriores: '+('aguardar' if blocked else 'confirmado'),
+            indicators={**decision.indicators,'historical_entry_score':result['score'],
+                'historical_feature_drift':result['feature_drift'],'historical_filter_passed':float(not blocked)})
+
+    def _technical_evaluate(self,bars: list[Bar]) -> Decision | None:
         decision=self._evaluate(bars)
         if decision is None or decision.side=='WAIT' or not any((self.min_trend_atr,self.min_efficiency,
             self.min_relative_volume,self.max_entry_atr,self.require_trend_slope)):return decision

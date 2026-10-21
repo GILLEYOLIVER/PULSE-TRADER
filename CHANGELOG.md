@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added an experimental L2 trade-outcome entry filter trained on realized net outcomes captured before fills, with temporal fold refits, sample/class requirements, checksum/time/parameter guards and no calibrated probability claims.
+- Corrected hourly warmup to require 250 prior candles and flagged six earlier short-context runs as ineligible for goal confirmation while preserving their financial results.
+- Added common forward-only validation folds for frozen learned references, reference cost stress/evidence, and batched hash-chain persistence.
+
 - Added chronological research cycles with per-asset/timeframe references, immutable code/configuration archives, comparable development folds, frozen external evaluation, cost stress and guarded research promotion.
 - Added neutral causal entry filters and an optional SMA200/RSI2 mean-reversion candidate with a bounded structural/ATR stop; desktop exposure settings remain protected.
 - Added public BNB/SOL spot histories, explicit missing/abbreviated-candle provenance and metrics-only development replay with equivalence coverage.

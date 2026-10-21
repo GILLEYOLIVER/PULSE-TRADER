@@ -23,7 +23,7 @@ def metrics(trades,capital,equity=None):
         "net":sum(results),"fees":sum(t["fees"] for t in trades),"max_drawdown":dd,
         "return_fraction":sum(results)/capital,"profit_factor_note":"undefined without losing trades" if not losses else ""}
 
-def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None,*,durable=False):
+def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None,*,durable=False,collect_trade_features=False):
     if not bars: raise ValueError("No data")
     previous={};sources={};timeframes={}
     for b in bars:
@@ -43,13 +43,21 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
     engine=PaperEngine(ledger,limits,costs,instruments=instruments,strategy=strategy,calendar=calendar)
     if any(engine.specs[symbol].currency!=engine.limits.currency for symbol in symbols):
         ledger.close();raise ValueError('Backtest requires instrument and account in the same currency')
-    equity=[]
+    equity=[];entry_context={}
     digest=hashlib.sha256()
     for group in groups:
         for b in group:
             digest.update(json.dumps(engine._bar_key(b)+[b.symbol],separators=(",",":")).encode())
-        engine.on_bars(group)
+        decisions=engine.on_bars(group)
         state=ledger.read()
+        if collect_trade_features:
+            from .trade_learning import trade_features
+            for decision in decisions:
+                if decision is not None and decision.side!='WAIT':
+                    key=engine.decision_key(decision);order=state['orders'].get(key)
+                    if order is not None and order['qty']>0:
+                        entry_context[key]={'features':trade_features(decision,engine.history[decision.symbol],engine.costs,engine.specs[decision.symbol]),
+                            'signal_at':decision.ts.isoformat()}
         b=group[0]
         _,unrealized,_=engine.risk.period_pnl(state,b.ts+timedelta(seconds=b.seconds))
         equity.append(engine.limits.capital+sum(t["net"] for t in state["trades"])+unrealized)
@@ -75,6 +83,10 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
         "orders":list(state["orders"].values()),"trades":state["trades"],"equity":equity,
         "limitations":["Synthetic results are not market evidence","OHLC cannot determine intrabar path; stop first",
             "Fees and margins are simulation inputs","No queue priority, auction, exchange halts, tax or official rollover modelling"]}
+    if collect_trade_features:
+        result['trade_training_samples']=[{**entry_context[t['id']],'label':int(t['net']>0),
+            'available_at':t['closed_at'],'net':t['net'],'trade_id':t['id']} for t in state['trades']
+            if t['id'] in entry_context and t['exit_reason']!='FLATTEN']
     json.dumps(result,allow_nan=False)  # disposable research state must never emit invalid numbers
     ledger.close()
     return result

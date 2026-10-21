@@ -49,6 +49,26 @@ def plan_forward(rotation,symbol,seconds,*,as_of,test_days,training_days,after=N
     raise ValueError('Sem janela inédita posterior ao aprendizado; aguarde dados novos ou avance em outro ativo/prazo')
 
 
+def warmup_start(start,seconds,count=250):
+    """Reserve enough past context at every timeframe, plus one day for real gaps."""
+    from datetime import timedelta
+    if type(seconds) is not int or seconds<=0 or type(count) is not int or count<1:raise ValueError('Invalid warmup size')
+    return (start-timedelta(days=math.ceil(seconds*count/86400)+1)).date().isoformat()
+
+
+def development_slices(bars,after=None):
+    """Compare every candidate on identical folds after any frozen model's cutoff."""
+    from datetime import datetime
+    first=len(bars)//2
+    if after:
+        cutoff=datetime.fromisoformat(after)
+        first=max(first,next((i for i,b in enumerate(bars) if b.ts>=cutoff),len(bars)))
+    count=len(bars)-first
+    if count<105:return []
+    cuts=[first,first+count//3,first+count*2//3,len(bars)]
+    return list(zip(cuts,cuts[1:]))
+
+
 def aggregate_metrics(reports):
     """Weight by actual trades. A no-trade run supplies no accuracy observations."""
     rows=[r['metrics'] if 'metrics' in r else r for r in reports]
@@ -96,7 +116,7 @@ def goal_evidence(records):
     """Only unchanged versions and disjoint real windows qualify an observed goal."""
     usable=[];windows=[];version=None
     for record in records:
-        if not record.get('real_history') or not record.get('passed'):continue
+        if not record.get('real_history') or not record.get('passed') or not record.get('qualified_for_goal',True):continue
         current=record['version_id']
         if version is not None and current!=version:raise ValueError('Cannot combine different versions for confirmation')
         version=current
