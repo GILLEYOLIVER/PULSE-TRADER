@@ -15,7 +15,7 @@ LIMIT_LABELS={
  'currency':'Moeda da conta: BRL, USD ou USDT','min_net_reward_r':'Alvo/risco mínimo após custos (0 desliga)',
  'consecutive_losses':'Perdas consecutivas para bloqueio', 'cooldown_seconds':'Bloqueio após perdas (segundos)',
  'start_hour':'Hora inicial (Brasília)', 'end_hour':'Hora final (Brasília)', 'allowed_symbols':'Ativos permitidos, separados por vírgula',
- 'allowed_strategies':'Permitidas: trend, breakout, pullback, adaptive, sma_cross, ema_pullback', 'max_data_age_seconds':'Idade máxima dos dados (segundos)'}
+ 'allowed_strategies':'Permitidas: trend, breakout, pullback, adaptive, sma_cross, ema_pullback, mean_reversion', 'max_data_age_seconds':'Idade máxima dos dados (segundos)'}
 COST_LABELS={'spread_ticks':'Spread simulado em ticks','slippage_ticks':'Slippage simulado em ticks',
  'fee_per_unit':'Taxa fixa por unidade/lado na moeda da conta','fee_bps':'Taxa sobre o financeiro por lado (10 bps = 0,1%)','participation':'Participação máxima no volume (fração)',
  'latency_bars':'Latência em candles','trailing_atr':'Trailing em ATR (0 desliga)','break_even_r':'Break-even em R (0 desliga)'}
@@ -49,7 +49,7 @@ class SettingsWindow:
         for row,(key,label) in enumerate((('name','Estratégia'),('reward_r','Alvo em múltiplos do risco'),('stop_atr','Stop em múltiplos do ATR'))):
             var=tk.StringVar(value=str(self.config['strategy'][key]));self.values[('strategy',key)]=var
             ttk.Label(form,text=label).grid(row=row,column=0,sticky='w',padx=8,pady=6)
-            widget=ttk.Combobox(form,textvariable=var,values=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback'),state='readonly') if key=='name' else ttk.Entry(form,textvariable=var)
+            widget=ttk.Combobox(form,textvariable=var,values=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion'),state='readonly') if key=='name' else ttk.Entry(form,textvariable=var)
             widget.grid(row=row,column=1,padx=8,pady=6)
         self.multitimeframe=tk.BooleanVar(value=engine.strategy.multi_timeframe)
         ttk.Checkbutton(form,text='Exigir confirmação em período maior',variable=self.multitimeframe).grid(row=3,column=0,columnspan=2,sticky='w',padx=8,pady=6)

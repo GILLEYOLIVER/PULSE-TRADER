@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added chronological research cycles with per-asset/timeframe references, immutable code/configuration archives, comparable development folds, frozen external evaluation, cost stress and guarded research promotion.
+- Added neutral causal entry filters and an optional SMA200/RSI2 mean-reversion candidate with a bounded structural/ATR stop; desktop exposure settings remain protected.
+- Added public BNB/SOL spot histories, explicit missing/abbreviated-candle provenance and metrics-only development replay with equivalence coverage.
+- Added runtime research bundles and frozen execution workspaces; repeated research seeks an observed >90% goal without treating tiny samples or synthetic data as qualification.
+- Added the user's weekly Codex quota stop rule: interrupt at 40% remaining or less.
+
 ## 2.2.0 - 2026-10-20
 
 - Added disposable research state and shared core indicators; final benchmark kept legacy results identical and ran about 24x faster than the durable reference on this machine.

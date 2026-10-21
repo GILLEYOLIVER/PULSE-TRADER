@@ -66,7 +66,7 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
         legs[symbol]=(same[-1].close-same[0].open)*spec.point_value*spec.lot-engine.costs.fee(same[0].open,spec.point_value,spec.lot)-engine.costs.fee(same[-1].close,spec.point_value,spec.lot)
     result={"version":2,"mode":"BACKTEST_PAPER","data_sha256":digest.hexdigest(),"sources":sources,
         "bars":len(bars),"start":first.ts.isoformat(),"end":end.isoformat(),"strategy":engine.strategy.name,
-        "parameters":{"reward_r":engine.strategy.reward_r,"stop_atr":engine.strategy.stop_atr,"multi_timeframe":engine.strategy.multi_timeframe},
+        "parameters":{k:v for k,v in asdict(engine.strategy).items() if k!='name'},
         "calendar":calendar.to_config() if calendar is not None else None,
         "limits":asdict(engine.limits),"execution":asdict(engine.costs),"metrics":metrics(state["trades"],engine.limits.capital,equity),
         "benchmark":{"symbol":first.symbol if len(symbols)==1 else None,"one_lot_buy_hold_net":sum(legs.values()),"legs":legs,"note":"one lot per symbol, no rollover; not risk matched"},

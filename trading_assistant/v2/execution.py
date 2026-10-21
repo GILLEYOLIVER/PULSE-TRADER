@@ -19,14 +19,15 @@ class PaperEngine:
         self.strategy=strategy or Strategy()
         self.history={};self.last_decision=None
         # Persist immutable assumptions and reject accidental reinterpretation of open positions.
-        config={"strategy":{"name":self.strategy.name,"reward_r":self.strategy.reward_r,"stop_atr":self.strategy.stop_atr,"multi_timeframe":self.strategy.multi_timeframe},"limits":asdict(self.limits),"costs":asdict(self.costs),"instruments":{k:asdict(v) for k,v in self.specs.items()}}
+        config={"strategy":asdict(self.strategy),"limits":asdict(self.limits),"costs":asdict(self.costs),"instruments":{k:asdict(v) for k,v in self.specs.items()}}
         if calendar is not None: config["calendar"]=calendar.to_config()
         import json
         config=json.loads(json.dumps(config))
         with ledger.transaction() as s:
             previous=s.get('config')
             if previous:
-                previous={**previous,'costs':asdict(ExecutionSettings(**previous['costs'])),
+                previous={**previous,'strategy':asdict(Strategy(**previous['strategy'])),
+                    'costs':asdict(ExecutionSettings(**previous['costs'])),
                     'limits':asdict(Limits(**previous['limits'])),
                     'instruments':{key:asdict(Instrument(**value)) for key,value in previous['instruments'].items()}}
                 previous=json.loads(json.dumps(previous))

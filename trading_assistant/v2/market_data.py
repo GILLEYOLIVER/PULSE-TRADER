@@ -126,28 +126,40 @@ def fetch_market(symbol, seconds=86400, *, provider='brapi', window='2y', now=No
                                 'mode': 'READ_ONLY', 'live_quotes': False})
 
 
-def fetch_binance(symbol,seconds,*,start,end,getter=json_response):
+def fetch_binance(symbol,seconds,*,start,end,getter=json_response,allow_gaps=False):
     """Public spot-only OHLC + closed-candle activity; no account/order URLs."""
     intervals={60:'1m',300:'5m',900:'15m',1800:'30m',3600:'1h',86400:'1d'}
-    if symbol not in ('BTCUSDT','ETHUSDT') or seconds not in intervals:
-        raise ValueError('Binance: BTCUSDT/ETHUSDT, 1m/5m/15m/30m/1h/diário; valores em USDT')
+    if symbol not in ('BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT') or seconds not in intervals:
+        raise ValueError('Binance: BTCUSDT/ETHUSDT/BNBUSDT/SOLUSDT, 1m/5m/15m/30m/1h/diário; valores em USDT')
+    if type(allow_gaps) is not bool:raise ValueError('Gap handling must be explicit')
     start,end=aware(start),aware(end)
     step=seconds*1000
     cursor=((int(start.timestamp()*1000)+step-1)//step)*step
     until=int(end.timestamp()*1000)//step*step
     if not cursor<until or (until-cursor)//step>10000:
         raise ValueError('Escolha um intervalo com 1 a 10.000 candles completos por consulta')
-    bars=[];pages=[]
+    bars=[];pages=[];gaps=[];abbreviated=[];expected_count=(until-cursor)//step
     while cursor<until:
         query=urllib.parse.urlencode(dict(symbol=symbol,interval=intervals[seconds],startTime=cursor,endTime=until-1,limit=1000))
         payload=getter('https://data-api.binance.vision/api/v3/klines?'+query)
-        if not isinstance(payload,list) or not payload:raise DataUnavailable('Histórico Binance incompleto no intervalo solicitado')
+        if not isinstance(payload,list):raise DataUnavailable('Histórico Binance incompleto no intervalo solicitado')
+        if not payload:
+            if not allow_gaps or not bars:raise DataUnavailable('Histórico Binance incompleto no intervalo solicitado')
+            gaps.append({'first_missing_ms':cursor,'next_available_ms':until,'candles':(until-cursor)//step})
+            break
         pages.append(hashlib.sha256(json.dumps(payload,separators=(',',':')).encode()).hexdigest())
         previous=cursor-step
         for row in payload:
             if (not isinstance(row,list) or len(row)<11 or type(row[0]) is not int or type(row[6]) is not int
-                or row[0]!=previous+step or row[6]!=row[0]+step-1 or row[0]>=until or type(row[8]) is not int):
+                or (row[0]!=previous+step if not allow_gaps else row[0]<previous+step or (row[0]-previous)%step!=0)
+                or (row[6]!=row[0]+step-1 if not allow_gaps else not row[0]<=row[6]<=row[0]+step-1)
+                or row[0]>=until or type(row[8]) is not int):
                 raise DataUnavailable('Candle Binance ausente, fora de ordem ou com horário incompatível')
+            if row[0]>previous+step:
+                gaps.append({'first_missing_ms':previous+step,'next_available_ms':row[0],
+                    'candles':(row[0]-previous)//step-1})
+            if row[6]<row[0]+step-1:
+                abbreviated.append({'open_ms':row[0],'source_close_ms':row[6],'nominal_close_ms':row[0]+step-1})
             bars.append(Bar(symbol,datetime.fromtimestamp(row[0]/1000,UTC),
                 *(float(row[index]) for index in (1,2,3,4,5)),'BINANCE_SPOT_USDT',seconds,
                 float(row[7]),int(row[8]),float(row[9])))
@@ -156,6 +168,9 @@ def fetch_binance(symbol,seconds,*,start,end,getter=json_response):
     return MarketSnapshot(bars,{'provider':'binance','symbol':symbol,'currency':'USDT','seconds':seconds,
         'retrieved_at':datetime.now(UTC).isoformat(),'last_closed_at':(bars[-1].ts+timedelta(seconds=seconds)).isoformat(),
         'candles':len(bars),'sha256':history_digest(bars),'page_sha256':pages,
+        'gap_policy':'preserve_and_disclose' if allow_gaps else 'strict_contiguous',
+        'expected_candles':expected_count,'missing_candles':sum(g['candles'] for g in gaps),'gaps':gaps,
+        'abbreviated_candles':abbreviated,'availability_clock':'nominal bucket end; never earlier than source close',
         'price_basis':'Spot USDT; volume base, volume financeiro, negócios e compras agressoras reais do candle encerrado',
         'documentation':'https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md',
         'mode':'READ_ONLY','live_quotes':False})
