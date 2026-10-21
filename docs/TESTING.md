@@ -9,7 +9,7 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-78 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
+101 tests passed without skips. The suite covers contract value sizing, budget below one lot, fees/exposure, daily/weekly/monthly blocks,
 profit stop, stale data, duplicate orders, manual oversizing, conservative barriers and gaps, sell trades,
 partial IOC fill, zero liquidity, cancel, disconnect/reconnect, emergency, rollback after injected failures,
 positions/blocks across restart, revised candles, invalid values, CSV roundtrip, aggregation, reproducibility,

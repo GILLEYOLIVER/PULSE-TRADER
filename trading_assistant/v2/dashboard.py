@@ -141,7 +141,7 @@ class Dashboard:
         columns=("kind","id","symbol","side","qty","price","state","net")
         table_frame=ttk.Frame(self.results);table_frame.pack(fill="both",expand=True)
         self.table=ttk.Treeview(table_frame,columns=columns,show="headings")
-        for col,title in zip(columns,("Tipo","Identificador","Ativo","Direção","Quantidade","Preço","Estado","Líquido R$")):
+        for col,title in zip(columns,("Tipo","Identificador","Ativo","Direção","Quantidade","Preço","Estado","Líquido")):
             self.table.heading(col,text=title);self.table.column(col,width=110,stretch=True)
         scrollbar=ttk.Scrollbar(table_frame,orient="vertical",command=self.table.yview)
         self.table.configure(yscrollcommand=scrollbar.set)
@@ -153,12 +153,12 @@ class Dashboard:
         settings=ttk.Frame(self.tabs,padding=12);self.tabs.add(settings,text="Risco e estratégias")
         settings_controls=ttk.Frame(settings);settings_controls.pack(fill='x')
         self._button(settings_controls,'Editar todos os parâmetros em formulários',self.open_settings,style='Accent.TButton')
-        ttk.Label(settings,text="Valores em R$; risco por operação em fração (0.005 = 0,5%). Margens e custos são premissas de simulação.",wraplength=1000).pack(anchor="w",padx=8,pady=8)
+        ttk.Label(settings,text="Valores na moeda da conta; risco por operação em fração (0.005 = 0,5%). Margens e custos são premissas de simulação.",wraplength=1000).pack(anchor="w",padx=8,pady=8)
         quick=ttk.LabelFrame(settings,text="Controles principais (PAPER)",padding=(12,8));quick.pack(fill="x",padx=8,pady=(0,10))
         self.quick_fields={
-            "capital":("Capital R$",self.limits.capital),
+            "capital":("Capital",self.limits.capital),
             "risk_percent":("Risco por operação %",self.limits.risk_fraction*100),
-            "daily_loss":("Perda máxima/dia R$",self.limits.daily_loss),
+            "daily_loss":("Perda máxima/dia",self.limits.daily_loss),
             "max_contracts":("Contratos máximos",self.limits.max_contracts),
             "max_trades":("Operações/dia",self.limits.max_trades),
             "strategy":("Estratégia",self.engine.strategy.name),
@@ -169,7 +169,7 @@ class Dashboard:
             ttk.Label(quick,text=label,style="Section.TLabel").grid(row=0,column=col,sticky="w",padx=4)
             var=tk.StringVar(value=str(value));self.quick_vars[key]=var
             if key=="strategy":
-                widget=ttk.Combobox(quick,textvariable=var,values=("trend","breakout","pullback"),state="readonly",width=15)
+                widget=ttk.Combobox(quick,textvariable=var,values=("trend","breakout","pullback","adaptive","sma_cross","ema_pullback"),state="readonly",width=15)
             else:
                 widget=ttk.Entry(quick,textvariable=var,width=17)
             widget.grid(row=1,column=col,sticky="ew",padx=4,pady=(5,8))
@@ -194,6 +194,13 @@ class Dashboard:
         self._button(about,'Criar backup da pasta de dados',self.backup_data)
         self._button(about,'Restaurar backup em outra pasta',self.restore_data)
         self._button(about,'Abrir outra pasta de dados',self.open_data_directory)
+        self._button(about,'Abrir memória de aprendizado',self.open_learning_memory)
+
+    def open_learning_memory(self):
+        import os
+        from .learning import LearningMemory
+        memory=LearningMemory(self.data_dir/'aprendizado')
+        os.startfile(memory.directory)
 
     def open_settings(self):
         from .settings_ui import SettingsWindow
@@ -418,15 +425,17 @@ class Dashboard:
             from .ml import train_temporal
             bars=list(self.feed)
             def done(report):
+                from .learning import LearningMemory
+                LearningMemory(self.data_dir/'aprendizado').remember_model(bars,report,path)
                 self.status.set(f"Modelo PAPER salvo. Acerto validação: {report['validation']['accuracy']:.1%}; "
                             f"referência: {report['validation']['majority_accuracy']:.1%}. "
                             "Modelo sem permissão de executar ordens.")
-            self.jobs.start(lambda:train_temporal(bars,path),done)
+            self.jobs.start(lambda:train_temporal(bars,path,feature_set='regime_flow_v2'),done)
             self.status.set('Treinamento em segundo plano…')
     def refresh(self):
         s=self.ledger.read();m=metrics(s["trades"],self.limits.capital)
         pnl,unrealized,worst=self.engine.risk.period_pnl(s,self.now())
-        self.summary.set(f"Capital R$ {self.limits.capital:,.2f}   |   Dia R$ {pnl['day']+unrealized:,.2f}   |   Risco aberto R$ {worst:,.2f}   |   Posições {len(s['positions'])}   |   Trades {m['trades']}   |   Win rate {m['win_rate']:.0%}   |   Emergência {'ATIVA' if s['emergency'] else 'não'}")
+        self.summary.set(f"Moeda {self.limits.currency} | Capital {self.limits.capital:,.2f} | Dia {pnl['day']+unrealized:,.2f} | Risco aberto {worst:,.2f} | Posições {len(s['positions'])} | Trades {m['trades']} | Win rate {m['win_rate']:.0%} | Emergência {'ATIVA' if s['emergency'] else 'não'}")
         self.metrics["capital"].set(self._brl(self.limits.capital))
         self.metrics["day"].set(self._brl(pnl['day']+unrealized))
         self.metrics["exposure"].set(self._brl(worst))
@@ -458,9 +467,8 @@ class Dashboard:
             result[index]=average
         return result
 
-    @staticmethod
-    def _brl(value):
-        return "R$ " + f"{value:,.2f}".replace(",","_").replace(".",",").replace("_",".")
+    def _brl(self,value):
+        return ('R$' if self.limits.currency=='BRL' else self.limits.currency)+' '+f"{value:,.2f}".replace(",","_").replace(".",",").replace("_",".")
 
     def draw(self):
         if not hasattr(self,"chart"):return

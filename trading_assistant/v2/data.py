@@ -26,7 +26,10 @@ class CSVProvider:
             for row in csv.DictReader(f):
                 b = Bar(row["symbol"].upper(),aware(datetime.fromisoformat(row["ts"])),
                         *(float(row[k]) for k in ("open","high","low","close","volume")),
-                        row["source"],int(row.get("seconds") or 60))
+                        row["source"],int(row.get("seconds") or 60),
+                        float(row['quote_volume']) if row.get('quote_volume') else None,
+                        int(row['trades']) if row.get('trades') else None,
+                        float(row['taker_buy_volume']) if row.get('taker_buy_volume') else None)
                 key=(b.symbol,b.ts)
                 if key in seen: raise ValueError("Duplicate candle")
                 seen.add(key)
@@ -67,8 +70,8 @@ class SyntheticProvider:
 def export_csv(bars: Iterable[Bar],path: str|Path):
     with Path(path).open("w",encoding="utf-8",newline="") as f:
         writer=csv.writer(f)
-        writer.writerow(("symbol","ts","open","high","low","close","volume","source","seconds"))
-        for b in bars: writer.writerow((b.symbol,b.ts.isoformat(),b.open,b.high,b.low,b.close,b.volume,b.source,b.seconds))
+        writer.writerow(("symbol","ts","open","high","low","close","volume","source","seconds","quote_volume","trades","taker_buy_volume"))
+        for b in bars: writer.writerow((b.symbol,b.ts.isoformat(),b.open,b.high,b.low,b.close,b.volume,b.source,b.seconds,*b.activity()))
 
 def aggregate(bars: list[Bar],seconds: int) -> list[Bar]:
     """Return only complete UTC-aligned buckets. Missing base bars => omit bucket."""
@@ -85,7 +88,9 @@ def aggregate(bars: list[Bar],seconds: int) -> list[Bar]:
         rows=sorted(rows,key=lambda b:b.ts)
         if len(rows)!=seconds//base or any(int(b.ts.timestamp())!=t+i*base for i,b in enumerate(rows)): continue
         out.append(Bar(symbol,datetime.fromtimestamp(t,UTC),rows[0].open,max(b.high for b in rows),
-            min(b.low for b in rows),rows[-1].close,sum(b.volume for b in rows),source,seconds))
+            min(b.low for b in rows),rows[-1].close,sum(b.volume for b in rows),source,seconds,
+            *(sum(getattr(b,key) for b in rows) if all(getattr(b,key) is not None for b in rows) else None
+              for key in ('quote_volume','trades','taker_buy_volume'))))
     return out
 
 class CandleStore:
@@ -100,7 +105,9 @@ class CandleStore:
                 payload=asdict(b);payload["ts"]=b.ts.isoformat()
                 args=(b.symbol,b.ts.isoformat(),b.seconds,b.source,json.dumps(payload,allow_nan=False))
                 old=self.db.execute("SELECT payload FROM candles WHERE symbol=? AND ts=? AND seconds=? AND source=?",args[:4]).fetchone()
-                if old and old[0]!=args[4]: raise ValueError("Historical candle revision requires explicit reimport")
+                if old:
+                    previous=json.loads(old[0]);previous['ts']=datetime.fromisoformat(previous['ts'])
+                    if Bar(**previous)!=b:raise ValueError("Historical candle revision requires explicit reimport")
                 self.db.execute("INSERT OR IGNORE INTO candles VALUES(?,?,?,?,?)",args)
 
     def load(self,symbol,seconds=60,source="SYNTHETIC") -> list[Bar]:

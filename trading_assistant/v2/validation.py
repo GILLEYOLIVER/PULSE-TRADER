@@ -32,7 +32,7 @@ def validate_history(bars, *, limits=None, costs=None, calendar=None, instrument
     best=max(candidates,key=lambda candidate:candidate['validation_metrics']['net'])
     final=run_backtest(holdout,Strategy(best['strategy']),limits,costs,calendar,instruments)
     stress=run_backtest(holdout,Strategy(best['strategy']),limits,
-                        ExecutionSettings(**{**asdict(costs),'slippage_ticks':costs.slippage_ticks*2,'fee_per_unit':costs.fee_per_unit*2}),calendar,instruments)
+                        ExecutionSettings(**{**asdict(costs),'slippage_ticks':costs.slippage_ticks*2,'fee_per_unit':costs.fee_per_unit*2,'fee_bps':costs.fee_bps*2}),calendar,instruments)
     with TemporaryDirectory() as directory:
         model=train_temporal(bars,Path(directory)/'model.json')
     real=all(not any(marker in row.source.upper() for marker in ('SYNTH','DEMO','MOCK')) for row in bars)

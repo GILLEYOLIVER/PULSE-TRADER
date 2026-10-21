@@ -15,14 +15,16 @@ from .strategy import Strategy
 PROFILES = {"intraday": "No dia", "swing": "Dias e semanas"}
 TRENDS = {"UP": "▲ ALTA", "DOWN": "▼ BAIXA", "FLAT": "● LATERAL", "UNKNOWN": "— SEM ANÁLISE"}
 SETUPS = {"CONFIRMED": "Sinal técnico", "CONDITIONAL": "Aguardar gatilho", "WAIT": "Aguardar", "INSUFFICIENT": "Sem dados suficientes"}
-STRATEGIES = {"trend": "Tendência", "breakout": "Rompimento", "pullback": "Retomada"}
+STRATEGIES = {"trend": "Tendência", "breakout": "Rompimento", "pullback": "Retomada", "adaptive":"Regime, tendência e fluxo",
+              "sma_cross":"Cruzamento SMA 20/50 e filtro 200", "ema_pullback":"Retomada EMA 9/21 e filtro 50"}
 
 
 def history_digest(bars):
     digest = hashlib.sha256()
     for b in bars:
-        digest.update(json.dumps([b.symbol, aware(b.ts).isoformat(), b.open, b.high, b.low,
-                                  b.close, b.volume, b.source, b.seconds], separators=(",", ":")).encode())
+        row=[b.symbol, aware(b.ts).isoformat(), b.open, b.high, b.low,b.close,b.volume,b.source,b.seconds]
+        if any(value is not None for value in b.activity()):row+=b.activity()
+        digest.update(json.dumps(row,separators=(",", ":")).encode())
     return digest.hexdigest()
 
 
@@ -93,13 +95,9 @@ def analyze_series(bars, profile, *, as_of=None, parameters=None, instruments=No
         raise ValueError("Use candles intradiários para No dia e diários (86400 s) para Dias e semanas")
     cutoff = aware(as_of or datetime.now(UTC))
     closed = [b for b in bars if aware(b.ts) + timedelta(seconds=b.seconds) <= cutoff]
-    digest = hashlib.sha256()
-    for b in closed:
-        digest.update(json.dumps([b.symbol, aware(b.ts).isoformat(), b.open, b.high, b.low,
-                                  b.close, b.volume, b.source, b.seconds], separators=(",", ":")).encode())
     base = dict(symbol=first.symbol, profile=profile, source=first.source, seconds=first.seconds,
                 closed_at=aware(closed[-1].ts) + timedelta(seconds=first.seconds) if closed else None,
-                candles=len(closed), data_sha256=digest.hexdigest(), history_sha256=history_digest(closed[-1000:]))
+                candles=len(closed), data_sha256=history_digest(closed), history_sha256=history_digest(closed[-1000:]))
     if len(closed) < 35:
         return Suggestion(**base, trend="UNKNOWN", setup="INSUFFICIENT",
                           reason=f"{len(closed)} candles encerrados; são necessários pelo menos 35.",

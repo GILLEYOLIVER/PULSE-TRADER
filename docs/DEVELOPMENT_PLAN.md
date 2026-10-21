@@ -1,6 +1,7 @@
 # Plano de desenvolvimento e situação
 
 Situação atual do upgrade 2.1: [seis passos, verificação e resultados](UPGRADE_6_STEPS.md).
+Situação do motor 2.2: [pesquisa e resultados externos](ENGINE_2_2_RESULTS.md).
 
 | Fase | Entregue | Limitação externa ou próxima etapa |
 |---|---|---|
@@ -15,7 +16,7 @@ Situação atual do upgrade 2.1: [seis passos, verificação e resultados](UPGRA
 | Backtest | Hash, custos, gaps, portfólio sincronizado, walk-forward, sensibilidade e holdout | Exige séries sincronizadas; resultados não garantem vantagem futura |
 | Qualidade | Suíte unitária/integração, falhas injetadas e smoke da interface | Mais homologação operacional necessária antes de qualquer integração real |
 | Windows | Inicialização, venv, executável/ZIP portátil por commit e self-test | Assinatura e homologação em outro computador permanecem externas |
-| GitHub | PR #1 integrado a `main` por solicitação do usuário; continuação na branch de desenvolvimento | Nova revisão necessária antes de outro merge |
+| GitHub | PRs #1, #2 e #3 integrados a `main`; novas entregas registradas no histórico Git | Manter revisão e evidência de testes |
 
 Complemento 2.0.2: calendário de sessão fornecido e conferido pelo usuário na UI/CLI/backtest,
 validação de origem/duração de CSV, contagens inteiras, séries de ML compatíveis e quantidade idempotente.

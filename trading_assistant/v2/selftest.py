@@ -40,6 +40,21 @@ def run(output):
         panel.arm_selected();assert panel.selected_plan()['state']=='ARMED'
         panel.cancel_selected();assert panel.selected_plan()['state']=='CANCELLED'
         result['checks'].append('catalog_to_replay_arm_and_cancel_plan')
+        from .data import SyntheticProvider
+        from unittest.mock import patch
+        dashboard.feed=SyntheticProvider('WDO',260,start=start+timedelta(days=1)).bars()
+        with dashboard.ledger.transaction() as state:state['feed']={'kind':'csv'}
+        model_path=Path(directory)/'trained-model.json'
+        with patch('trading_assistant.v2.dashboard.filedialog.asksaveasfilename',return_value=str(model_path)):
+            dashboard.train_model()
+        deadline=time.monotonic()+15
+        while dashboard.jobs.busy and time.monotonic()<deadline:
+            dashboard.root.update();time.sleep(.01)
+        from .learning import LearningMemory
+        records=LearningMemory(Path(directory)/'aprendizado').training_records()
+        assert model_path.exists() and len(records)==1
+        assert (Path(directory)/'aprendizado'/records[0]['payload']['dataset_path']).exists()
+        result['checks'].append('enriched_training_and_local_learning_memory')
         from .backups import create_backup,restore_backup
         backup=Path(directory)/'copy.zip';create_backup(directory,backup)
         restored=Path(directory)/'restored';restore_backup(backup,restored)

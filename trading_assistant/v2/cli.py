@@ -13,7 +13,7 @@ def main(argv=None):
     p.add_argument("command",choices=("backtest","demo","train","walk-forward","sensitivity","diagnose"))
     p.add_argument("--csv");p.add_argument("--symbol",default="WIN");p.add_argument("--bars",type=int,default=1000)
     p.add_argument("--seed",type=int,default=42);p.add_argument("--seconds",type=int,default=60)
-    p.add_argument("--strategy",choices=("trend","breakout","pullback"),default="trend")
+    p.add_argument("--strategy",choices=("trend","breakout","pullback","adaptive","sma_cross","ema_pullback"),default="trend")
     p.add_argument("--calendar-json",help="Optional user-verified B3 session calendar JSON")
     p.add_argument("--output",default="reports/latest.json")
     a=p.parse_args(argv)

@@ -2,7 +2,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict
 from datetime import datetime,timedelta
-from .models import Bar,Decision,ExecutionSettings,INSTRUMENTS,Limits,aware
+from .models import Bar,Decision,ExecutionSettings,INSTRUMENTS,Instrument,Limits,aware
 from .ledger import Ledger
 from .risk import RiskManager
 from .strategy import Strategy
@@ -24,7 +24,13 @@ class PaperEngine:
         import json
         config=json.loads(json.dumps(config))
         with ledger.transaction() as s:
-            if s.get("config")!=config and (s["positions"] or any(o["status"]=="NEW" for o in s["orders"].values())):
+            previous=s.get('config')
+            if previous:
+                previous={**previous,'costs':asdict(ExecutionSettings(**previous['costs'])),
+                    'limits':asdict(Limits(**previous['limits'])),
+                    'instruments':{key:asdict(Instrument(**value)) for key,value in previous['instruments'].items()}}
+                previous=json.loads(json.dumps(previous))
+            if previous!=config and (s["positions"] or any(o["status"]=="NEW" for o in s["orders"].values())):
                 raise ValueError("Open exposure requires identical saved configuration")
             s["config"]=config
 
@@ -53,7 +59,7 @@ class PaperEngine:
             "message":reason,"requested_qty":requested,"bars_waited":0,"point_value":spec.point_value if spec else 0.,
             "margin":spec.margin if spec else 0.,"reserved_risk":0.}
         if qty:
-            per_unit=abs(d.price-d.stop)*spec.point_value+2*self.costs.fee_per_unit+2*(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick*spec.point_value
+            per_unit=abs(d.price-d.stop)*spec.point_value+self.costs.fee(d.price,spec.point_value)+self.costs.fee(d.stop,spec.point_value)+2*(self.costs.spread_ticks/2+self.costs.slippage_ticks)*spec.tick*spec.point_value
             order["reserved_risk"]=qty*per_unit
         s["orders"][key]=order
         self.ledger.audit(d.ts,"order_"+order["status"].lower(),{"id":key,"message":reason,"quantity":qty})
@@ -189,7 +195,7 @@ class PaperEngine:
         price=(math.ceil(raw/spec.tick) if direction>0 else math.floor(raw/spec.tick))*spec.tick
         d=self._decision(o)
         qty,reason=self.risk.assess(s,d,spec,b.ts,entry=price,exclude=o["id"])
-        qty=min(qty,o["qty"],int(s.get("liquidity",{}).get(b.symbol,0)*self.costs.participation)//spec.lot*spec.lot)
+        qty=min(qty,o["qty"],int(s.get("liquidity",{}).get(b.symbol,0)/spec.volume_per_unit*self.costs.participation)//spec.lot*spec.lot)
         if qty<spec.lot:
             o["status"]="REJECTED";o["message"]=reason if reason!="Approved" else "Insufficient simulated liquidity"
         else:
@@ -197,7 +203,7 @@ class PaperEngine:
             o["cancelled_qty"]=o["qty"]-qty  # IOC remainder canceled; never fills on another bar
             s["positions"][o["id"]]={"id":o["id"],"symbol":o["symbol"],"side":o["side"],"qty":qty,
                 "entry":price,"stop":o["stop"],"initial_stop":o["stop"],"target":o["target"],"point_value":spec.point_value,
-                "tick":spec.tick,"margin":spec.margin,"entry_fee":qty*self.costs.fee_per_unit,
+                "tick":spec.tick,"margin":spec.margin,"entry_fee":self.costs.fee(price,spec.point_value,qty),
                 "opened_at":b.ts.isoformat(),"strategy":o["strategy"],"regime":o.get("regime","unknown"),"source":b.source}
         o["reserved_risk"]=0.
         self._update_plan_order(s,o)
@@ -209,7 +215,7 @@ class PaperEngine:
         price-=direction*adverse
         if price<=0: raise ValueError("Exit price invalid")
         gross=(price-p["entry"])*direction*p["qty"]*p["point_value"]
-        fees=p["entry_fee"]+p["qty"]*self.costs.fee_per_unit
+        fees=p["entry_fee"]+self.costs.fee(price,p['point_value'],p['qty'])
         trade={**p,"exit":price,"closed_at":ts.isoformat(),"exit_reason":reason,"gross":gross,"fees":fees,"net":gross-fees}
         s["trades"].append(trade)
         del s["positions"][p["id"]]
@@ -289,14 +295,31 @@ class PaperEngine:
                         direction=1 if buy else -1
                         r=abs(p["entry"]-p["initial_stop"])
                         if self.costs.break_even_r and (b.close-p["entry"])*direction>=r*self.costs.break_even_r:
-                            candidate=p["entry"]+direction*2*self.costs.fee_per_unit/p["point_value"]
-                            p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
+                            rate=self.costs.fee_bps/10000.
+                            slip=(self.costs.slippage_ticks+self.costs.spread_ticks/2)*p['tick']
+                            # Solve fee(entry)+fee(exit)+price P&L=0, including adverse exit.
+                            if direction>0 and rate>=1:continue
+                            exit_price=(p['entry']*(direction+rate)+2*self.costs.fee_per_unit/p['point_value'])/(direction-rate)
+                            candidate=exit_price+direction*slip
+                            if (buy and candidate<b.close) or (not buy and candidate>b.close):
+                                p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
                         history=self.history.get(b.symbol,[])
                         if self.costs.trailing_atr and len(history)>=35:
                             from .indicators import snapshot
                             a=snapshot(history)["atr"]
                             candidate=b.close-direction*self.costs.trailing_atr*a
                             p["stop"]=max(p["stop"],candidate) if buy else min(p["stop"],candidate)
+                        if p['strategy'] in ('sma_cross','ema_pullback') and len(history)>=50:
+                            from .indicators import ema,snapshot
+                            from statistics import mean
+                            closed=history+[b]
+                            values=[row.close for row in closed]
+                            moving=mean(values[-50:]) if p['strategy']=='sma_cross' else ema(values,21)
+                            buffer=snapshot(closed,full=False)['atr']*self.strategy.stop_atr*.5
+                            candidate=moving-direction*buffer
+                            # A protective moving stop only tightens, after this candle closes.
+                            if candidate>0 and ((buy and candidate<b.close) or (not buy and candidate>b.close)):
+                                p['stop']=max(p['stop'],candidate) if buy else min(p['stop'],candidate)
             for b in bars:
                 s["marks"][b.symbol]=b.close
                 s["last_bars"][b.symbol]=(b.ts+timedelta(seconds=b.seconds)).isoformat()
@@ -319,7 +342,8 @@ class PaperEngine:
 
     @staticmethod
     def _bar_key(b):
-        return [b.ts.isoformat(),b.open,b.high,b.low,b.close,b.volume,b.source,b.seconds]
+        row=[b.ts.isoformat(),b.open,b.high,b.low,b.close,b.volume,b.source,b.seconds]
+        return row+b.activity() if any(value is not None for value in b.activity()) else row
 
     def flatten(self,now):
         """Paper liquidation at latest marks, with configured adverse exit costs."""

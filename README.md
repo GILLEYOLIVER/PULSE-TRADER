@@ -1,7 +1,24 @@
-# PULSE-TRADER 2.0
+# PULSE-TRADER 2.2
 
 Plataforma desktop de análise, replay histórico, backtesting e **operações exclusivamente simuladas (PAPER)**.
 Não conecta sua conta Rico e não contém envio real de ordens.
+
+## Atualização do motor
+
+[Resultados, limites e memória local da versão 2.2](docs/ENGINE_2_2_RESULTS.md).
+Inclui pesquisa mais rápida, custos proporcionais, controle de moeda/unidades, métodos por
+médias móveis, dados públicos de atividade do candle e estudos com treino e avaliação separados.
+As novas estratégias permanecem candidatas: os testes não demonstraram vantagem consistente.
+O motor de decisão usa regras locais; modelos estatísticos são opcionais.
+
+A memória fica em `runtime/aprendizado/`, com históricos, modelos e registros separados de
+treino e avaliação. Na aba Ajuda há **Abrir memória de aprendizado**. O treino pela interface
+preserva automaticamente seu histórico nessa pasta. Não precisa instalar banco ou servidor.
+
+`python -m scripts.research_goals --plan-only` mostra janelas inéditas; sem `--plan-only`,
+executa duas rodadas limitadas em períodos móveis, com dois processos de CPU por padrão.
+Cada ciclo preserva seus relatórios. A memória pode propor parâmetros do treino anterior;
+os resultados cegos ficam fora dessa seleção. Não há retreino infinito ou agendado.
 
 ## Iniciar no Windows
 

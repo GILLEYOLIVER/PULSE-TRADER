@@ -3,6 +3,7 @@
 Data: 20/10/2026. Execução financeira: exclusivamente PAPER.
 
 Atualização 2.1: [execução dos seis passos e resultados reais](UPGRADE_6_STEPS.md).
+Atualização 2.2: [motor, memória, médias móveis e testes externos](ENGINE_2_2_RESULTS.md).
 Inclui fontes públicas, conversor do Profit, contexto financeiro/CVM, entrada PAPER vinculada aos planos,
 formulários completos, tarefas em segundo plano, backup/restauração e construção portátil Windows.
 
@@ -86,8 +87,8 @@ Ambiente isolado: `.\scripts\install.ps1` e `.\scripts\start.ps1`.
 ## Entrega Git
 
 O PR #1 foi integrado a `main` em 20/10/2026 por solicitação explícita do usuário, no commit `cfdc55b`.
-Esta continuação está em `feature/pulse-trader-v2` e precisa de revisão antes de novo merge;
-o trabalho atual não altera `main` automaticamente.
+Os PRs #2 e #3 também foram integrados por solicitação do usuário. As atualizações seguem
+com commits e revisão; consulte o histórico Git para a integração mais recente.
 
 ## Pasta local
 

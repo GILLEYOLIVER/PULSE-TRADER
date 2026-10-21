@@ -8,15 +8,16 @@ from dataclasses import asdict
 
 
 LIMIT_LABELS={
- 'capital':'Capital de referência R$', 'risk_fraction':'Risco por operação %', 'daily_loss':'Perda máxima diária R$',
- 'weekly_loss':'Perda máxima semanal R$', 'monthly_loss':'Perda máxima mensal R$', 'daily_target':'Meta diária R$',
+ 'capital':'Capital de referência na moeda da conta', 'risk_fraction':'Risco por operação %', 'daily_loss':'Perda máxima diária',
+ 'weekly_loss':'Perda máxima semanal', 'monthly_loss':'Perda máxima mensal', 'daily_target':'Meta diária',
  'max_positions':'Posições simultâneas', 'max_contracts':'Unidades/contratos máximos por ativo', 'max_trades':'Operações por dia',
- 'max_spread_ticks':'Spread máximo em ticks', 'max_slippage_ticks':'Slippage máximo em ticks', 'max_exposure':'Exposição máxima R$',
+ 'max_spread_ticks':'Spread máximo em ticks', 'max_slippage_ticks':'Slippage máximo em ticks', 'max_exposure':'Exposição máxima na moeda da conta',
+ 'currency':'Moeda da conta: BRL, USD ou USDT','min_net_reward_r':'Alvo/risco mínimo após custos (0 desliga)',
  'consecutive_losses':'Perdas consecutivas para bloqueio', 'cooldown_seconds':'Bloqueio após perdas (segundos)',
  'start_hour':'Hora inicial (Brasília)', 'end_hour':'Hora final (Brasília)', 'allowed_symbols':'Ativos permitidos, separados por vírgula',
- 'allowed_strategies':'Estratégias permitidas: trend, breakout, pullback', 'max_data_age_seconds':'Idade máxima dos dados (segundos)'}
+ 'allowed_strategies':'Permitidas: trend, breakout, pullback, adaptive, sma_cross, ema_pullback', 'max_data_age_seconds':'Idade máxima dos dados (segundos)'}
 COST_LABELS={'spread_ticks':'Spread simulado em ticks','slippage_ticks':'Slippage simulado em ticks',
- 'fee_per_unit':'Taxa por unidade por lado R$','participation':'Participação máxima no volume (fração)',
+ 'fee_per_unit':'Taxa fixa por unidade/lado na moeda da conta','fee_bps':'Taxa sobre o financeiro por lado (10 bps = 0,1%)','participation':'Participação máxima no volume (fração)',
  'latency_bars':'Latência em candles','trailing_atr':'Trailing em ATR (0 desliga)','break_even_r':'Break-even em R (0 desliga)'}
 
 
@@ -48,7 +49,7 @@ class SettingsWindow:
         for row,(key,label) in enumerate((('name','Estratégia'),('reward_r','Alvo em múltiplos do risco'),('stop_atr','Stop em múltiplos do ATR'))):
             var=tk.StringVar(value=str(self.config['strategy'][key]));self.values[('strategy',key)]=var
             ttk.Label(form,text=label).grid(row=row,column=0,sticky='w',padx=8,pady=6)
-            widget=ttk.Combobox(form,textvariable=var,values=('trend','breakout','pullback'),state='readonly') if key=='name' else ttk.Entry(form,textvariable=var)
+            widget=ttk.Combobox(form,textvariable=var,values=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback'),state='readonly') if key=='name' else ttk.Entry(form,textvariable=var)
             widget.grid(row=row,column=1,padx=8,pady=6)
         self.multitimeframe=tk.BooleanVar(value=engine.strategy.multi_timeframe)
         ttk.Checkbutton(form,text='Exigir confirmação em período maior',variable=self.multitimeframe).grid(row=3,column=0,columnspan=2,sticky='w',padx=8,pady=6)
@@ -66,12 +67,14 @@ class SettingsWindow:
         self.instrument=tk.StringVar(value=next(iter(engine.specs)))
         combo=ttk.Combobox(form,textvariable=self.instrument,values=tuple(engine.specs));combo.grid(row=0,column=1,padx=8,pady=8)
         self.instrument_vars={}
-        for row,(key,label) in enumerate((('point_value','Valor em R$ por ponto/unidade'),('tick','Variação mínima do preço'),('lot','Lote em unidades inteiras'),('margin','Margem/capital reservado por unidade R$'),('expiry','Vencimento AAAA-MM-DD (opcional)')),1):
+        for row,(key,label) in enumerate((('point_value','Valor por ponto na moeda do ativo'),('tick','Variação mínima do preço'),('lot','Lote em unidades inteiras do motor'),('margin','Capital reservado por unidade'),('expiry','Vencimento AAAA-MM-DD (opcional)'),('currency','Moeda do ativo: BRL, USD ou USDT'),('volume_per_unit','Volume base correspondente a uma unidade do motor')),1):
             var=tk.StringVar();self.instrument_vars[key]=var
             ttk.Label(form,text=label,wraplength=450).grid(row=row,column=0,sticky='w',padx=8,pady=6)
             ttk.Entry(form,textvariable=var).grid(row=row,column=1,padx=8,pady=6)
         combo.bind('<<ComboboxSelected>>',lambda _:self.load_instrument())
-        ttk.Label(form,text='BTC/ETH são spot BRL; esta versão usa unidades inteiras. Para ações, revise lote, máximo de unidades e capital reservado. Os valores não são margens oficiais da corretora.',wraplength=700).grid(row=6,column=0,columnspan=2,padx=8,pady=12)
+        self.allow_short=tk.BooleanVar()
+        ttk.Checkbutton(form,text='Permitir posição vendida simulada neste ativo',variable=self.allow_short).grid(row=8,column=0,columnspan=2,padx=8,pady=6,sticky='w')
+        ttk.Label(form,text='BTC/ETH são BRL; BTCUSDT/ETHUSDT são USDT. Um ativo só opera se a moeda coincidir com a conta. Unidades menores exigem valor por ponto e volume por unidade compatíveis. Margens/taxas são premissas de simulação.',wraplength=700).grid(row=9,column=0,columnspan=2,padx=8,pady=12)
         self.load_instrument()
 
     def _scroll_tab(self,title):
@@ -89,6 +92,7 @@ class SettingsWindow:
         spec=self.config['instruments'].get(self.instrument.get())
         if spec:
             for key,var in self.instrument_vars.items():var.set('' if spec[key] is None else str(spec[key]))
+            self.allow_short.set(spec['allow_short'])
 
     def apply(self):
         import re
@@ -102,7 +106,7 @@ class SettingsWindow:
                 value=[part.strip() for part in value.replace(';',',').split(',') if part.strip()]
                 if key=='allowed_symbols':value=[part.upper() for part in value]
             elif key in ('max_positions','max_contracts','max_trades','consecutive_losses','cooldown_seconds','start_hour','end_hour','max_data_age_seconds','latency_bars'):value=int(value)
-            elif key!='name':value=float(value.replace(',','.'))
+            elif key not in ('name','currency'):value=float(value.replace(',','.'))
             if key=='risk_fraction':value/=100
             data[section][key]=value
         data['strategy']['multi_timeframe']=self.multitimeframe.get()
@@ -117,7 +121,9 @@ class SettingsWindow:
             date.fromisoformat(expiry)
         spec=Instrument(symbol,float(self.instrument_vars['point_value'].get().replace(',','.')),
                         float(self.instrument_vars['tick'].get().replace(',','.')),int(self.instrument_vars['lot'].get()),
-                        float(self.instrument_vars['margin'].get().replace(',','.')),expiry=expiry)
+                        float(self.instrument_vars['margin'].get().replace(',','.')),expiry=expiry,
+                        currency=self.instrument_vars['currency'].get().strip().upper(),allow_short=self.allow_short.get(),
+                        volume_per_unit=float(self.instrument_vars['volume_per_unit'].get().replace(',','.')))
         data['instruments'][symbol]=asdict(spec)
         previous=self.dashboard.settings_text.get('1.0','end')
         self.dashboard.settings_text.delete('1.0','end');self.dashboard.settings_text.insert('1.0',json.dumps(data,indent=2))
