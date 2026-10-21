@@ -238,3 +238,16 @@ class ChampionStore:
                 'at':datetime.now(timezone.utc).isoformat()})
             item['champion']=version_id
         return previous
+
+    def validated_reference(self,state,group):
+        """A source rebase is not a successful trading-policy promotion."""
+        item=state['groups'][group];anchor=None
+        accepted={'INITIAL_REFERENCE','VALIDATION_AND_EXTERNAL_GATE_PASSED'}
+        repairs={'REFERENCE_PARAMETERS_REEVALUATED_ON_NEW_CODE','RESTORED_ORIGINAL_ARCHIVED_REFERENCE'}
+        for row in item['history']:
+            if row['reason'] in accepted:anchor=row['version']
+            elif row['reason'] not in repairs:
+                raise ValueError('Unrecognized champion history; original reference requires review')
+        if anchor is None:raise ValueError('No original or validated reference in history')
+        if self.version(anchor)['group']!=group:raise ValueError('Reference history belongs to another group')
+        return anchor

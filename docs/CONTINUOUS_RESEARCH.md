@@ -4,7 +4,7 @@
 
 Buscar mais de 90% de operações encerradas com resultado líquido positivo, após os custos declarados. A porcentagem refere-se a operações, não a candles previstos ou testes de software. A meta pode não ser alcançável; não será declarada sem resultados. Não há execução real.
 
-Cada ativo e prazo tem sua própria versão de referência de pesquisa. O ciclo preserva configurações, código, dados e relatórios. Uma melhoria em Bitcoin não é transferida automaticamente para Ethereum. O risco, o capital e os custos são iguais entre as versões comparadas.
+Cada ativo e prazo tem sua própria versão de referência de pesquisa. O ciclo preserva configurações, código, dados e relatórios. Uma melhoria em Bitcoin não é transferida automaticamente para Ethereum. O risco, o capital, os custos e as unidades dos instrumentos são iguais entre as versões comparadas. Limites de política, como o alvo/risco mínimo e as estratégias permitidas, podem diferir e ficam explícitos no protocolo.
 
 O universo inicial desta rotina é BTCUSDT, ETHUSDT, BNBUSDT e SOLUSDT em candles de 5 minutos, uma hora e um dia. A meta do conjunto só é declarada quando as referências dos grupos acompanhados cumprirem a confirmação; um ativo isolado não encerra a missão.
 
@@ -35,6 +35,18 @@ Uma porcentagem isolada acima de 90% não encerra a missão. A mesma versão con
 Os relatórios mantêm taxas de abstenção, bloqueios e encerramentos forçados. Operações negativas e dias adversos não podem ser removidos. Mudar o alvo/stop ou o código cria uma nova versão e reinicia a confirmação daquela versão. Dados sintéticos servem a testes mecânicos e nunca qualificam a meta.
 
 ## Persistência e continuidade
+
+### Comparação com a implementação original
+
+A partir da iteração de referência arquivada, a referência externa é executada em outro processo Python, importando apenas sua cópia original de código, parâmetros, custos e limites. Os mesmos candles e contexto são entregues à candidata e à referência. Não há acesso à rede nem alteração do registro pelo processo de controle. Falha de integridade ou incompatibilidade interrompe aquela avaliação; não há substituição silenciosa pela implementação atual.
+
+As primeiras rodadas preservaram o código, mas reaplicaram parâmetros antigos ao motor novo. Esses resultados continuam identificados por suas versões próprias e não confirmam a implementação antiga. As mudanças automáticas com motivo `REFERENCE_PARAMETERS_REEVALUATED_ON_NEW_CODE` são restauradas para a última referência inicial ou promovida por validação e teste externo. O histórico completo permanece no registro, incluindo essa restauração. Uma tradução dos parâmetros antigos pode participar do desenvolvimento como semente do código atual, mas não representa a execução da referência antiga.
+
+O controle preserva inclusive o aquecimento original: não corrige o algoritmo antigo durante a comparação. Importações são isoladas do projeto atual e os fontes são verificados por hash. O relatório inclui identificação do código original, da pasta materializada, do transportador de dados, diferenças explícitas de política, decisões e métricas normais e com custos dobrados. Um inicializador vazio de pacote é a única estrutura adicional permitida para arquivos antigos que não o incluíam.
+
+### Janelas ampliadas antes de novas avaliações
+
+Após a rodada `20261021T035539524994`, somente os próximos testes externos passam a usar 28 dias em cinco minutos e 90 dias em uma hora, mantendo 90 dias nos diários. O desenvolvimento continua com 30/365 dias e quatro anos nos diários BNB/SOL. A escolha é anterior aos novos resultados e busca amostras maiores; nenhum período já aberto é ampliado retroativamente. Os limites de operações, lucro, custos dobrados e perda máxima permanecem. Esse tamanho, incluindo 250 candles anteriores, cabe no limite de 10.000 candles por consulta.
 
 `runtime/aprendizado/ciclos/` contém versões imutáveis por hash, cópias do código e estado das referências de pesquisa. `reports/research-cycles/` contém protocolo, matrizes, dados de origem, decisões, resultados e relatório de cada rodada. A rotação usa também o registro anterior `historicos_utilizados.json`.
 
