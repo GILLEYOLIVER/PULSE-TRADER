@@ -33,6 +33,8 @@ Após o ranking técnico no desenvolvimento, no máximo seis bases passam por um
 
 As primeiras duas bases desse ranking com amostra suficiente recebem os quatro limiares de pontuação já declarados. Permanecem no máximo oito candidatas aprendidas avaliadas em validação. As bases rejeitadas ficam registradas; não são feitos testes externos extras para escolhê-las. A verificação não escolhe bases por pontuação de modelos ou por resultados externos.
 
+O experimento posterior de [pontuação líquida](NET_SCORE_PROTOCOL.md) acrescenta a segunda variante por base e declara o novo máximo de 16 candidatas aprendidas, sem alterar os critérios financeiros nem as rodadas antigas. A reserva e o adiamento diante de falhas seguem a [recuperação da fonte](PROVIDER_RECOVERY.md).
+
 O primeiro prefixo selecionado é reutilizado sem uma segunda simulação, somente se seu hash de dados, parâmetros e corte temporal forem idênticos. Os modelos dos blocos seguintes continuam ajustados exclusivamente com o passado daquele bloco. Rótulos posteriores ao corte, encerramentos artificiais de fim de janela e dados incompatíveis continuam recusados conforme o protocolo do filtro.
 
 ## O que não é conclusão

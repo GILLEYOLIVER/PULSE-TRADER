@@ -48,10 +48,12 @@ class Strategy:
         from .trade_learning import score_trade
         result=score_trade(self.trade_filter,decision,bars)
         blocked=result['abstain'] or result['score']<self.trade_score_threshold
+        net_indicators={'historical_net_score_r':result['net_score_r'],
+            'historical_net_gate_passed':float(result['net_gate_passed'])} if 'net_score_r' in result else {}
         return replace(decision,side='WAIT' if blocked else decision.side,
             reason=decision.reason+'; filtro de operações anteriores: '+('aguardar' if blocked else 'confirmado'),
             indicators={**decision.indicators,'historical_entry_score':result['score'],
-                'historical_feature_drift':result['feature_drift'],'historical_filter_passed':float(not blocked)})
+                'historical_feature_drift':result['feature_drift'],'historical_filter_passed':float(not blocked),**net_indicators})
 
     def _technical_evaluate(self,bars: list[Bar]) -> Decision | None:
         decision=self._evaluate(bars)

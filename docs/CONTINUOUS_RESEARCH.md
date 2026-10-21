@@ -10,7 +10,7 @@ O universo inicial desta rotina é BTCUSDT, ETHUSDT, BNBUSDT e SOLUSDT em candle
 
 ## Protocolo antes dos resultados
 
-1. Reservar uma janela externa inédita e registrar o protocolo. Históricos antes usados como avaliação continuam identificados. Falha de download não torna a janela nova novamente.
+1. Registrar o protocolo para uma janela externa inédita e verificar a fonte. Na [recuperação prospectiva da fonte](PROVIDER_RECOVERY.md), a reserva ocorre depois do desenvolvimento e da escolha congelada, antes do primeiro pedido externo. Históricos antes reservados ou usados como avaliação continuam identificados; falha de download externo não torna a janela nova novamente.
 2. Usar somente histórico anterior à janela externa, com três blocos cronológicos de validação e aquecimento anterior sem ordens. O motor recebe um candle encerrado por vez, com execução posterior.
 3. Comparar a referência e candidatas determinísticas de tendência, rompimento, retomada e médias móveis. Os filtros candidatos medem separação/inclinação das médias, eficiência direcional, volume e distância até a média. Stops permanecem sujeitos ao orçamento central de risco.
 4. Exigir amostra, lucro líquido e consistência nos blocos de desenvolvimento. Priorizar limite inferior descritivo do acerto entre as candidatas elegíveis, além de expectativa, perdas e custos. Ausência de candidata elegível preserva a referência e registra insuficiência.
@@ -28,7 +28,7 @@ Ausências reais de candles são registradas no manifesto e preservadas sem pree
 
 ## Critério de meta
 
-A iteração de aprendizado com operações encerradas segue [o protocolo do filtro de entradas](TRADE_MODEL_PROTOCOL.md). São no máximo oito candidatas adicionais por grupo, com pontuação não calibrada, modelos ajustados somente no passado de cada bloco e os mesmos critérios financeiros. O desenvolvimento usa 30 dias em cinco minutos e 365 dias em uma hora. O contexto externo inicialmente exigia 250 candles; os próximos lotes da [iteração multitemporal](MULTI_TIMEFRAME_PROTOCOL.md) exigem 1.024 e incluem variantes com confirmação por prazo maior, sem alterar rodadas abertas.
+A iteração de aprendizado com operações encerradas segue [o protocolo do filtro de entradas](TRADE_MODEL_PROTOCOL.md), com pontuação não calibrada, modelos ajustados somente no passado de cada bloco e os mesmos critérios financeiros. O máximo inicial de oito candidatas adicionais passa a 16 no [experimento de pontuação líquida](NET_SCORE_PROTOCOL.md). O desenvolvimento inicialmente usava 30 dias em cinco minutos e 365 dias em uma hora. O contexto externo inicialmente exigia 250 candles; a [iteração multitemporal](MULTI_TIMEFRAME_PROTOCOL.md) exige 1.024 e inclui variantes com confirmação por prazo maior, sem alterar rodadas abertas.
 
 A [iteração de histórico ampliado](LONG_HISTORY_PROTOCOL.md) passa, somente nos próximos lotes, a 90 dias de desenvolvimento em cinco minutos, 540 dias em uma hora e quatro anos nos diários. Os tamanhos anteriores continuam registrados em seus protocolos originais. A amostra do professor é verificada antes da escolha de até duas bases para modelos.
 

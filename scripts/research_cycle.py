@@ -12,7 +12,7 @@ from dataclasses import asdict,replace
 from datetime import datetime,timedelta
 from pathlib import Path
 
-from scripts.train_and_blind_test import assumptions,get_data
+from scripts.train_and_blind_test import assumptions
 from trading_assistant.v2.archived_replay import archived_replay,comparison_contract
 from trading_assistant.v2.blind_testing import blind_replay
 from trading_assistant.v2.learning import HistoricalRotation,LearningMemory,digest
@@ -20,9 +20,11 @@ from trading_assistant.v2.models import UTC,Instrument
 from trading_assistant.v2.research import (RESEARCH_WARMUP,ChampionStore,aggregate_metrics,atomic_json,candidate_bank,
     development_result,development_slices,goal_evidence,plan_forward,promotion_decision,select_development,warmup_start)
 from trading_assistant.v2.strategy import Strategy
-from trading_assistant.v2.research_history import get_research_history
+from trading_assistant.v2.research_history import get_research_history,check_research_source,record_provider_backoff
+from trading_assistant.v2.market_data import DataUnavailable,TransientDataUnavailable,ProviderBackoffRequired
 from trading_assistant.v2.suggestions import history_digest
-from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model,training_sample_health)
+from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model,
+    training_sample_health,classification_only_model)
 
 
 METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
@@ -71,7 +73,7 @@ def teacher_prefix_task(task):
             'parameters':asdict(Strategy(**base_parameters(parameters))),'cutoff':bars[lo].ts.isoformat()}}
 
 
-def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None):
+def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_net_head=False):
     base=base_parameters(parameters);strategy=Strategy(**base)
     limits,costs,specs=research_assumptions(bars[0].symbol)
     if teacher_data is None:samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs)
@@ -82,43 +84,51 @@ def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None):
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     atomic_json(directory/'labels.json',{'samples':samples,'teacher':diagnostics,'cutoff':cutoff.isoformat()})
     model=fit_trade_model(samples,parameters=asdict(strategy),symbol=bars[0].symbol,seconds=bars[0].seconds,
-        source=bars[0].source,cutoff=cutoff,costs=costs,instrument=specs[bars[0].symbol],dataset_sha256=history_digest(bars))
+        source=bars[0].source,cutoff=cutoff,costs=costs,instrument=specs[bars[0].symbol],dataset_sha256=history_digest(bars),
+        with_net_head=with_net_head,risk_budget=limits.capital*limits.risk_fraction if with_net_head else None)
     atomic_json(directory/'model.json',model)
     return model,diagnostics
 
 
 def learned_development_task(task):
     bars,parameters,after,directory,*preflight=task;thresholds=(.55,.65,.8,.9)
-    reports={threshold:[] for threshold in thresholds};training=[]
+    kinds=('trade_outcome_logistic','trade_outcome_logistic_net')
+    reports={(kind,threshold):[] for kind in kinds for threshold in thresholds};training=[]
+    def training_for(kind):
+        return [{**row,'model_sha256':row['model_sha256_by_variant'][kind]} for row in training]
     base=base_parameters(parameters);limits,costs,specs=research_assumptions(bars[0].symbol)
     for index,(lo,hi) in enumerate(development_slices(bars,after),1):
         try:model,diagnostics=fit_entry_filter(bars[:lo],base,Path(directory)/f'fold-{index}',bars[lo].ts,
-            teacher_data=preflight[0] if index==1 and preflight else None)
+            teacher_data=preflight[0] if index==1 and preflight else None,with_net_head=True)
         except InsufficientTradeData as error:
             result=[]
-            for threshold in thresholds:
-                row=development_result(base,[]);row.update(learning={'threshold':threshold,'kind':'trade_outcome_logistic'},
-                    training_status='INSUFFICIENT_RESOLVED_TRADES',detail=str(error),training=training)
+            for kind,threshold in reports:
+                row=development_result(base,[]);row.update(learning={'threshold':threshold,'kind':kind},
+                    training_status='INSUFFICIENT_RESOLVED_TRADES',detail=str(error),training=training_for(kind))
                 result.append(row)
             return result
-        training.append({'fold':index,'model_sha256':model['sha256'],'cutoff':model['training_cutoff'],
-            'training_samples':model['training_samples'],'teacher':diagnostics})
-        for threshold in thresholds:
-            strategy=Strategy(**base,trade_filter=model,trade_score_threshold=threshold)
+        baseline=classification_only_model(model)
+        training.append({'fold':index,'model_sha256_by_variant':{kinds[0]:baseline['sha256'],kinds[1]:model['sha256']},
+            'cutoff':model['training_cutoff'],'training_samples':model['training_samples'],'teacher':diagnostics})
+        atomic_json(Path(directory)/f'fold-{index}'/'classification-only-model.json',baseline)
+        for kind,threshold in reports:
+            strategy=Strategy(**base,trade_filter=model if kind=='trade_outcome_logistic_net' else baseline,
+                trade_score_threshold=threshold)
             report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-RESEARCH_WARMUP):lo],strategy=strategy,
                 limits=limits,costs=costs,instruments=specs,retain_trace=False,bootstrap=False)
-            reports[threshold].append(report)
+            reports[kind,threshold].append(report)
     result=[]
-    for threshold in thresholds:
-        row=development_result(base,reports[threshold]);row.update(learning={'threshold':threshold,'kind':'trade_outcome_logistic'},
-            training_status='TEMPORAL_FOLDS_EVALUATED',training=training)
+    for kind,threshold in reports:
+        row=development_result(base,reports[kind,threshold]);row.update(learning={'threshold':threshold,'kind':kind},
+            training_status='TEMPORAL_FOLDS_EVALUATED',training=training_for(kind))
         result.append(row)
     return result
 
 
 def materialize_candidate(winner,training,directory,cutoff):
     if not winner.get('learning'):return asdict(Strategy(**winner['parameters']))
-    model,_=fit_entry_filter(training,winner['parameters'],Path(directory)/'trade-models'/'final',cutoff)
+    model,_=fit_entry_filter(training,winner['parameters'],Path(directory)/'trade-models'/'final',cutoff,
+        with_net_head=winner['learning'].get('kind')=='trade_outcome_logistic_net')
     return asdict(Strategy(**base_parameters(winner['parameters']),trade_filter=model,
         trade_score_threshold=winner['learning']['threshold']))
 
@@ -178,6 +188,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     development_after=(parameters.get('trade_filter') or {}).get('training_cutoff')
     bank=candidate_bank(count,parameters,args.candidates,allow_multi_timeframe=seconds in (300,3600))
     plan={'cycle_id':cycle_id,'group':group,'windows':window,'code_id':code_id,
+        'external_reservation':'after sealed policy, before the first external request',
         'reference_id':reference_id,'reference_code_id':original_reference['code_id'],
         'reference_execution':'original archived source and original assumptions',
         'development_reference':'current-code port used only as a development seed',
@@ -192,6 +203,8 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'mean_reversion_confirmation':'higher SMA50/200 alignment and close on same side of SMA200',
         'daily_grid':'unchanged; insufficient prefix for 200 higher candles in early folds'}
     plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
+        'model_variants':['trade_outcome_logistic','trade_outcome_logistic_net'],
+        'maximum_validated_variants':16,'net_gate':'additional fixed positive net-risk score; training data only',
         'teacher_prefix_preflight':{'maximum_ranked_bases':6,'selected_eligible_bases':2,
             'uses_only':'natural labels realized before the first validation fold; no model score selection'},
         'minimum_resolved_training_trades':100,'minimum_each_net_outcome':20,
@@ -199,8 +212,6 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'common_development_after':development_after,'score_is_calibrated_probability':False}
     group_dir=output/group.replace(':','-');group_dir.mkdir()
     atomic_json(group_dir/'protocol-before-data.json',plan)
-    rotation.reserve(cycle_id,symbol,seconds,window['test_start'],window['test_end'])
-    state['groups'][group]['last_external_end']=window['test_end'];store.save(state)
     print(group+': downloading development '+window['training_start']+' / '+window['test_start'],flush=True)
     training=get_research_history(symbol,seconds,window['training_start'],window['test_start'],group_dir)
     if any(b.source!='BINANCE_SPOT_USDT' for b in training):raise ValueError('Unexpected research data origin')
@@ -237,13 +248,17 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     memory.append_batch('VALIDATION',[{'profile':group,'cycle_id':cycle_id,**row} for row in results])
     memory.append('SEALED_POLICY',{'profile':group,'cycle_id':cycle_id,'winner':{'parameters':selected_parameters,
         'risk_profile':'fixed_conservative'},'policy_sha256':policy['sha256'],'candidate_id':candidate_id})
+    # Failed development downloads never open the external period. Once the
+    # frozen policy is recorded, reserve BEFORE requesting any external bytes.
+    rotation.reserve(cycle_id,symbol,seconds,window['test_start'],window['test_end'])
+    state['groups'][group]['last_external_end']=window['test_end'];store.save(state)
     with (group_dir/'COMPARACAO.csv').open('w',encoding='utf-8-sig',newline='') as stream:
         writer=csv.writer(stream,delimiter=';');writer.writerow(('parameters','learning','eligible','trades','wins','win_rate','net_USDT','drawdown_USDT'))
         for row in results:
             m=row['aggregate'];writer.writerow((json.dumps(row['parameters']),json.dumps(row.get('learning')),row['eligible'],m['trades'],m['wins'],m['win_rate'],m['net'],m['max_window_drawdown']))
     start=datetime.fromisoformat(window['test_start']).replace(tzinfo=UTC)
     context_start=warmup_start(start,seconds,RESEARCH_WARMUP)
-    full=get_data(symbol,seconds,context_start,window['test_end'],group_dir,allow_gaps=True)
+    full=get_research_history(symbol,seconds,context_start,window['test_end'],group_dir)
     warmup=[b for b in full if b.ts<start][-RESEARCH_WARMUP:];testing=[b for b in full if b.ts>=start]
     if len(warmup)<RESEARCH_WARMUP:raise ValueError('Contexto anterior insuficiente; a avaliação não começa consumindo candles do teste como aquecimento')
     c=external_run(testing,warmup,selected_parameters,group,group_dir,'candidate')
@@ -330,10 +345,19 @@ def main():
             output=Path(args.output)/cycle_id;output.mkdir(parents=True)
             summary={'cycle_id':cycle_id,'code_id':code_id,'groups':[],'goal_reached':False,'mode':'PAPER','status':'IN_PROGRESS'}
             atomic_json(output/'batch-before-results.json',{'groups':args.groups,'technical_candidates_per_group':args.candidates,
-                'maximum_trade_filter_candidates_per_group':8,
+                'maximum_trade_filter_candidates_per_group':16,
                 'maximum_teacher_prefix_preflights_per_group':6,
                 'workers':args.workers,'code_id':code_id,'started_at':cycle_id})
-            for group in args.groups:
+            provider_deferred=False
+            try:check_research_source(store.directory)
+            except DataUnavailable as error:
+                provider_deferred=True
+                record_provider_backoff(store.directory,error)
+                atomic_json(output/'provider-unavailable.json',{'error_type':type(error).__name__,'detail':str(error)})
+            for index,group in enumerate(args.groups):
+                if provider_deferred:
+                    summary['groups'].append({'group':group,'status':'DEFERRED_PROVIDER_UNAVAILABLE','external_reserved':False})
+                    continue
                 try:row=run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id)
                 except Exception as error:
                     row={'group':group,'status':'FAILED','error_type':type(error).__name__,'detail':str(error)}
@@ -344,6 +368,8 @@ def main():
                         archive=store.directory/'runs'/(cycle_id+'-'+failed_dir.name+'.zip')
                         try:row['runtime_archive']=str(archive.resolve()) if archive.exists() else store.archive_run(failed_dir)
                         except Exception as archive_error:row['archive_error']=str(archive_error)
+                    if isinstance(error,(TransientDataUnavailable,ProviderBackoffRequired)):
+                        provider_deferred=True;record_provider_backoff(store.directory,error)
                     print(json.dumps(row),flush=True)
                 summary['groups'].append(row)
                 # All tracked markets/profiles must qualify; one lucky asset cannot end the full mission.
@@ -351,13 +377,16 @@ def main():
                     state['groups'].get(g,{}).get('last_evidence',{}).get('observed_goal_reached',False)
                     and state['groups'][g]['last_evidence'].get('version_id')==state['groups'][g]['champion'] for g in GROUPS)
                 atomic_json(output/'summary.json',summary);write_report(output,summary)
-            state['completed_cycles']+=1;store.save(state)
-            summary['status']='COMPLETED_WITH_ERRORS' if any(r['status']=='FAILED' for r in summary['groups']) else 'COMPLETED'
+            if provider_deferred:state['deferred_cycles']=state.get('deferred_cycles',0)+1
+            else:state['completed_cycles']+=1
+            store.save(state)
+            summary['status']='DEFERRED_PROVIDER_UNAVAILABLE' if provider_deferred else (
+                'COMPLETED_WITH_ERRORS' if any(r['status']=='FAILED' for r in summary['groups']) else 'COMPLETED')
             atomic_json(output/'summary.json',summary);write_report(output,summary)
             atomic_json(store.directory/'latest.json',{'cycle_id':cycle_id,'report':str((output/'RELATORIO.md').resolve()),
                 'summary':str((output/'summary.json').resolve()),'goal_reached':summary['goal_reached']})
             print(json.dumps({'cycle_id':cycle_id,'goal_reached':summary['goal_reached'],'report':str(output/'RELATORIO.md')}),flush=True)
-            if summary['goal_reached'] or all(row['status']=='WAITING_FOR_UNSEEN_DATA' for row in summary['groups']):break
+            if provider_deferred or summary['goal_reached'] or all(row['status']=='WAITING_FOR_UNSEEN_DATA' for row in summary['groups']):break
 
 
 if __name__=='__main__':

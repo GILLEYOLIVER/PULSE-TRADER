@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an experimental net-risk regression gate alongside the unchanged logistic classifier; preserve untrimmed losses, train-only scaling and exact classifier equivalence. Preregister a maximum of 16 learned validation variants for future batches.
+- Check source availability, retry bounded transient reads, respect rate/permission failures, reserve holdouts only after development is sealed and defer unstarted groups after provider failure. Existing consumed windows remain preserved.
+
 - Add resumable, checked research histories in bounded chunks, whole-interval coverage validation, past-window and free-space guards, and preserved failed-run bundles.
 - Preregister longer development windows and verify natural-trade sample/class sufficiency before selecting at most two learned bases; reuse only identical checked first-prefix data.
 

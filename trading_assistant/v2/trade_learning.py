@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime,timedelta
 from statistics import mean,pstdev
@@ -12,6 +13,9 @@ from .models import aware
 
 
 TRADE_FEATURES=(*ENRICHED,'gross_reward_r','stop_distance_atr','estimated_cost_stop_ratio','side')
+LOGISTIC='trade_outcome_logistic_l2'
+LOGISTIC_NET='trade_outcome_logistic_l2_net_gate'
+NET_GATE_EPS=1e-6
 
 
 class InsufficientTradeData(ValueError):
@@ -42,7 +46,34 @@ def training_sample_health(samples):
         'eligible':len(recent)>=100 and min(wins,losses)>=20}
 
 
-def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,instrument,dataset_sha256):
+def fit_net_head(clean,transformed,risk_budget):
+    if type(risk_budget) not in (int,float) or not math.isfinite(risk_budget) or risk_budget<=0:
+        raise ValueError('Net-score training requires a positive finite risk budget')
+    targets=[]
+    for sample in clean:
+        net=sample.get('net')
+        if (type(net) not in (int,float) or not math.isfinite(net)
+            or int(net>0)!=sample['label']):raise ValueError('Net-score label disagrees with realized net cash')
+        targets.append(net/risk_budget)
+    if not all(math.isfinite(y) for y in targets):raise ValueError('Invalid net-score target scaling')
+    center=mean(targets);scale=max(1e-6,pstdev(targets));width=len(TRADE_FEATURES)
+    weights=[0.]*(width+1)
+    # Untrimmed net outcomes; train-only target scaling controls numeric units.
+    # Negative tails remain in the target and in every financial evaluation.
+    for _ in range(120):
+        gradients=[0.]*(width+1)
+        for (x,_),target in zip(transformed,targets):
+            error=sum(w*v for w,v in zip(weights,x))-(target-center)/scale
+            for j in range(width+1):gradients[j]+=error*x[j]
+        for j in range(width+1):weights[j]-=.05*(gradients[j]/len(clean)+(.05*weights[j] if j<width else 0.))
+    return {'weights':weights,'target_mean_r':center,'target_scale_r':scale,'risk_budget':risk_budget,
+        'positive_gate_r':NET_GATE_EPS,'loss':'squared_error_l2','regularization':.05,
+        'units':'realized net cash / training risk budget; unvalidated score, not a promise of cash'}
+
+
+def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,instrument,dataset_sha256,
+    with_net_head=False,risk_budget=None):
+    if type(with_net_head) is not bool:raise ValueError('Net-head training must be explicit')
     cutoff=aware(cutoff);seen=set();clean=[]
     for sample in samples:
         signal=aware(datetime.fromisoformat(sample['signal_at']))
@@ -72,7 +103,7 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
             error=sigmoid(sum(w*v for w,v in zip(weights,x)))-y
             for j in range(width+1):gradients[j]+=error*x[j]
         for j in range(width+1):weights[j]-=.05*(gradients[j]/len(clean)+(.05*weights[j] if j<width else 0.))
-    model={'schema':1,'algorithm':'trade_outcome_logistic_l2','features':list(TRADE_FEATURES),
+    model={'schema':1,'algorithm':LOGISTIC_NET if with_net_head else LOGISTIC,'features':list(TRADE_FEATURES),
         'parameters':base_parameters(parameters),'symbol':symbol,'seconds':seconds,'source':source,
         'training_cutoff':cutoff.isoformat(),'training_samples':len(clean),'training_wins':wins,
         'training_samples_sha256':digest(clean),'dataset_sha256':dataset_sha256,
@@ -81,15 +112,24 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
         'target':'positive realized net P&L after modeled costs; natural STOP/TARGET exits only',
         'censoring':'forced end-of-window exits excluded from fitting regardless of sign, included in all financial evaluations',
         'execution_enabled':False}
+    if with_net_head:model['net_head']=fit_net_head(clean,transformed,risk_budget)
     model['sha256']=digest(model)
     return model
+
+
+def classification_only_model(model):
+    """Exact old classifier from the shared fit, with its own immutable checksum."""
+    validate_trade_model(model)
+    value=deepcopy(model);value.pop('sha256');value.pop('net_head',None);value['algorithm']=LOGISTIC
+    value['sha256']=digest(value)
+    return value
 
 
 def validate_trade_model(model,parameters=None):
     if not isinstance(model,dict):raise ValueError('Trade filter must be a checked JSON model')
     value=dict(model);claimed=value.pop('sha256',None)
     if digest(value)!=claimed:raise ValueError('Trade model checksum mismatch')
-    if (model.get('schema')!=1 or model.get('algorithm')!='trade_outcome_logistic_l2'
+    if (model.get('schema')!=1 or model.get('algorithm') not in (LOGISTIC,LOGISTIC_NET)
         or model.get('features')!=list(TRADE_FEATURES) or model.get('probability_calibrated') is not False
         or model.get('execution_enabled') is not False or model.get('normalization_floor')!=1e-6):
         raise ValueError('Unsupported trade-outcome model')
@@ -100,6 +140,18 @@ def validate_trade_model(model,parameters=None):
         or any(not 1e-6<=sd<=50 for sd in arrays[1]) or any(abs(m)>50 for m in arrays[0])
         or any(abs(w)>100 for w in arrays[2])):raise ValueError('Invalid trade model dimensions or scaling')
     if model.get('training_samples',0)<100:raise ValueError('Trade model has insufficient training evidence')
+    head=model.get('net_head')
+    if model['algorithm']==LOGISTIC_NET:
+        if not isinstance(head,dict):raise ValueError('Net-score model requires its checked net head')
+        values=[head.get(k) for k in ('target_mean_r','target_scale_r','risk_budget','positive_gate_r')]
+        weights=head.get('weights')
+        if (any(type(v) not in (int,float) or not math.isfinite(v) for v in values)
+            or values[1]<1e-6 or values[2]<=0 or values[3]!=NET_GATE_EPS
+            or head.get('loss')!='squared_error_l2' or head.get('regularization')!=.05
+            or not isinstance(weights,list) or len(weights)!=width+1
+            or any(type(w) not in (int,float) or not math.isfinite(w) or abs(w)>100 for w in weights)):
+            raise ValueError('Invalid net-score head dimensions, units or scaling')
+    elif head is not None:raise ValueError('Classifier cannot silently ignore a net head')
     if parameters is not None and model['parameters']!=base_parameters(parameters):
         raise ValueError('Trade model belongs to different entry/stop/target parameters; retrain it')
     aware(datetime.fromisoformat(model['training_cutoff']))
@@ -116,8 +168,14 @@ def score_trade(model,decision,bars):
     z=[(v-m)/sd for v,m,sd in zip(x,model['means'],model['stds'])]
     drift=max(abs(v) for v in z)
     bounded=[max(-8.,min(8.,v)) for v in z]+[1.]
-    return {'score':sigmoid(sum(w*v for w,v in zip(model['weights'],bounded))),
+    result={'score':sigmoid(sum(w*v for w,v in zip(model['weights'],bounded))),
         'feature_drift':drift,'abstain':drift>8,'probability_calibrated':False}
+    if model['algorithm']==LOGISTIC_NET:
+        head=model['net_head'];net_score=head['target_mean_r']+head['target_scale_r']*sum(w*v for w,v in zip(head['weights'],bounded))
+        if not math.isfinite(net_score):raise ValueError('Net score overflow; no decision is permitted')
+        passed=net_score>head['positive_gate_r']
+        result.update(net_score_r=net_score,net_gate_passed=passed,abstain=result['abstain'] or not passed)
+    return result
 
 
 def collect_trade_samples(bars,strategy,limits,costs,instruments):
