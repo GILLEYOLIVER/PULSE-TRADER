@@ -298,7 +298,8 @@ class PaperEngine:
                 s["last_bars"][b.symbol]=b.ts.isoformat()
             self.risk.block_reason(s,bars[0].ts)
             by_symbol={b.symbol:b for b in bars}
-            for o in sorted(list(s["orders"].values()),key=lambda o:(o["symbol"],o["id"])):
+            for o in sorted((order for order in s['orders'].values() if order['status']=='NEW'),
+                            key=lambda o:(o['symbol'],o['id'])):
                 b=by_symbol.get(o["symbol"])
                 if b is not None and o["status"]=="NEW":
                     if sources[b.symbol]!=o.get("source",b.source):

@@ -9,7 +9,11 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-173 tests passed without skips. Cash-risk coverage reproduces and fixes the ordinary short-stop fee
+181 tests passed without skips. Initial-risk model coverage verifies exact paid-entry/initial-stop
+cash labels, invariant targets under quantity scaling, unchanged classifier weights, preserved gap
+tails, mandatory checked risk units, per-variant model provenance and final materialization.
+Date-cache coverage verifies that changed monetary values at the same timestamp immediately change risk blocks.
+Cash-risk coverage reproduces and fixes the ordinary short-stop fee
 breach, verifies rounded adverse entry reservations, filled-price semantics, remaining stop cash,
 legacy pending reservations, invalid prices and uncapped exit-gap losses. Net-score coverage verifies unchanged classifier results, correct per-variant
 model-checksum provenance, unfavorable
@@ -84,3 +88,9 @@ stops stayed within budget and 554 exit gaps retained their full independently c
 including 493 above budget. There were 4,451 submission rejections and 46 subsequent fill rejections.
 No accounting assertion failed. These are mechanics checks, never market win-rate or goal evidence.
 See CASH_RISK_ACCOUNTING.md for the original reproduction and reproducible report paths.
+
+An isolated before/after/after/before replay benchmark used the same 3,000 known BTC candles and
+recorded exactly identical hashes of metrics, all orders, all trades, equity and training labels.
+The median replay time changed from 8.5793s to 4.2284s (2.029x throughput) on this machine while
+other research was active. It verifies the pending-only sort and bounded pure-date cache, not a
+universal speed guarantee or market improvement. See REPLAY_OVERHEAD.md.

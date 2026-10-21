@@ -85,7 +85,9 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
             "Fees and margins are simulation inputs","No queue priority, auction, exchange halts, tax or official rollover modelling"]}
     if collect_trade_features:
         result['trade_training_samples']=[{**entry_context[t['id']],'label':int(t['net']>0),
-            'available_at':t['closed_at'],'net':t['net'],'trade_id':t['id']} for t in state['trades']
+            'available_at':t['closed_at'],'net':t['net'],'trade_id':t['id'],
+            'initial_stop_cash':engine.costs.stop_loss(t['entry'],t['initial_stop'],t['side'],
+                t['point_value'],t['tick'],t['qty'],entry_fee=t['entry_fee'])} for t in state['trades']
             if t['id'] in entry_context and t['exit_reason']!='FLATTEN']
     json.dumps(result,allow_nan=False)  # disposable research state must never emit invalid numbers
     ledger.close()

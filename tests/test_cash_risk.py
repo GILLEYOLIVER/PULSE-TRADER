@@ -98,5 +98,15 @@ class CashRiskCase(unittest.TestCase):
         self.assertGreater(-trade['net'],self.budget)
         self.assertAlmostEqual(trade['exit'],110.1)
 
+    def test_date_conversion_cache_never_hides_changed_cash_at_the_same_timestamp(self):
+        engine,ledger,d,spec=self.engine();state=ledger.read()
+        state['trades']=[{'closed_at':START.isoformat(),'net':-10.}]
+        first=engine.risk.period_pnl(state,START)[0]
+        self.assertEqual(first,{'day':-10.,'week':-10.,'month':-10.})
+        state['trades'][0]['net']=-1000.
+        second=engine.risk.period_pnl(state,START)[0]
+        self.assertEqual(second,{'day':-1000.,'week':-1000.,'month':-1000.})
+        self.assertIn('Loss limit',engine.risk.block_reason(state,START))
+
 
 if __name__=='__main__':unittest.main()

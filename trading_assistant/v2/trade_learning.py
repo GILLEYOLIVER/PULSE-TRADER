@@ -15,6 +15,7 @@ from .models import aware
 TRADE_FEATURES=(*ENRICHED,'gross_reward_r','stop_distance_atr','estimated_cost_stop_ratio','side')
 LOGISTIC='trade_outcome_logistic_l2'
 LOGISTIC_NET='trade_outcome_logistic_l2_net_gate'
+LOGISTIC_INITIAL_RISK='trade_outcome_logistic_l2_initial_risk_gate'
 NET_GATE_EPS=1e-6
 
 
@@ -46,7 +47,7 @@ def training_sample_health(samples):
         'eligible':len(recent)>=100 and min(wins,losses)>=20}
 
 
-def fit_net_head(clean,transformed,risk_budget):
+def fit_net_head(clean,transformed,risk_budget,*,initial_risk=False):
     if type(risk_budget) not in (int,float) or not math.isfinite(risk_budget) or risk_budget<=0:
         raise ValueError('Net-score training requires a positive finite risk budget')
     targets=[]
@@ -54,7 +55,10 @@ def fit_net_head(clean,transformed,risk_budget):
         net=sample.get('net')
         if (type(net) not in (int,float) or not math.isfinite(net)
             or int(net>0)!=sample['label']):raise ValueError('Net-score label disagrees with realized net cash')
-        targets.append(net/risk_budget)
+        denominator=sample.get('initial_stop_cash') if initial_risk else risk_budget
+        if (type(denominator) not in (int,float) or not math.isfinite(denominator)
+            or not 0<denominator<=risk_budget+1e-7):raise ValueError('Invalid or missing initial stop cash')
+        targets.append(net/denominator)
     if not all(math.isfinite(y) for y in targets):raise ValueError('Invalid net-score target scaling')
     center=mean(targets);scale=max(1e-6,pstdev(targets));width=len(TRADE_FEATURES)
     weights=[0.]*(width+1)
@@ -66,9 +70,12 @@ def fit_net_head(clean,transformed,risk_budget):
             error=sum(w*v for w,v in zip(weights,x))-(target-center)/scale
             for j in range(width+1):gradients[j]+=error*x[j]
         for j in range(width+1):weights[j]-=.05*(gradients[j]/len(clean)+(.05*weights[j] if j<width else 0.))
-    return {'weights':weights,'target_mean_r':center,'target_scale_r':scale,'risk_budget':risk_budget,
+    head={'weights':weights,'target_mean_r':center,'target_scale_r':scale,'risk_budget':risk_budget,
         'positive_gate_r':NET_GATE_EPS,'loss':'squared_error_l2','regularization':.05,
         'units':'realized net cash / training risk budget; unvalidated score, not a promise of cash'}
+    if initial_risk:head.update(target_basis='initial_stop_cash',
+        units='realized net cash / actual initial stop cash including costs; unvalidated score')
+    return head
 
 
 def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,instrument,dataset_sha256,
@@ -125,11 +132,27 @@ def classification_only_model(model):
     return value
 
 
+def initial_risk_model(model,samples):
+    """Change only the net target; require the exact already checked training labels."""
+    validate_trade_model(model)
+    if model['algorithm']!=LOGISTIC_NET:raise ValueError('Initial-risk variant requires the shared joint fit')
+    clean=sorted(samples,key=lambda s:s['signal_at'])[-3000:]
+    if len(clean)!=model['training_samples'] or digest(clean)!=model['training_samples_sha256']:
+        raise ValueError('Initial-risk labels differ from the checked joint fit')
+    transformed=[([max(-8.,min(8.,(v-m)/sd)) for v,m,sd in
+        zip(s['features'],model['means'],model['stds'])]+[1.],s['label']) for s in clean]
+    value=deepcopy(model);value.pop('sha256');value['algorithm']=LOGISTIC_INITIAL_RISK
+    value['net_head']=fit_net_head(clean,transformed,model['net_head']['risk_budget'],initial_risk=True)
+    value['sha256']=digest(value)
+    validate_trade_model(value)
+    return value
+
+
 def validate_trade_model(model,parameters=None):
     if not isinstance(model,dict):raise ValueError('Trade filter must be a checked JSON model')
     value=dict(model);claimed=value.pop('sha256',None)
     if digest(value)!=claimed:raise ValueError('Trade model checksum mismatch')
-    if (model.get('schema')!=1 or model.get('algorithm') not in (LOGISTIC,LOGISTIC_NET)
+    if (model.get('schema')!=1 or model.get('algorithm') not in (LOGISTIC,LOGISTIC_NET,LOGISTIC_INITIAL_RISK)
         or model.get('features')!=list(TRADE_FEATURES) or model.get('probability_calibrated') is not False
         or model.get('execution_enabled') is not False or model.get('normalization_floor')!=1e-6):
         raise ValueError('Unsupported trade-outcome model')
@@ -141,7 +164,7 @@ def validate_trade_model(model,parameters=None):
         or any(abs(w)>100 for w in arrays[2])):raise ValueError('Invalid trade model dimensions or scaling')
     if model.get('training_samples',0)<100:raise ValueError('Trade model has insufficient training evidence')
     head=model.get('net_head')
-    if model['algorithm']==LOGISTIC_NET:
+    if model['algorithm'] in (LOGISTIC_NET,LOGISTIC_INITIAL_RISK):
         if not isinstance(head,dict):raise ValueError('Net-score model requires its checked net head')
         values=[head.get(k) for k in ('target_mean_r','target_scale_r','risk_budget','positive_gate_r')]
         weights=head.get('weights')
@@ -151,6 +174,9 @@ def validate_trade_model(model,parameters=None):
             or not isinstance(weights,list) or len(weights)!=width+1
             or any(type(w) not in (int,float) or not math.isfinite(w) or abs(w)>100 for w in weights)):
             raise ValueError('Invalid net-score head dimensions, units or scaling')
+        basis=head.get('target_basis','risk_budget')
+        if basis!=('initial_stop_cash' if model['algorithm']==LOGISTIC_INITIAL_RISK else 'risk_budget'):
+            raise ValueError('Net-score target units disagree with model algorithm')
     elif head is not None:raise ValueError('Classifier cannot silently ignore a net head')
     if parameters is not None and model['parameters']!=base_parameters(parameters):
         raise ValueError('Trade model belongs to different entry/stop/target parameters; retrain it')
@@ -170,7 +196,7 @@ def score_trade(model,decision,bars):
     bounded=[max(-8.,min(8.,v)) for v in z]+[1.]
     result={'score':sigmoid(sum(w*v for w,v in zip(model['weights'],bounded))),
         'feature_drift':drift,'abstain':drift>8,'probability_calibrated':False}
-    if model['algorithm']==LOGISTIC_NET:
+    if model['algorithm'] in (LOGISTIC_NET,LOGISTIC_INITIAL_RISK):
         head=model['net_head'];net_score=head['target_mean_r']+head['target_scale_r']*sum(w*v for w,v in zip(head['weights'],bounded))
         if not math.isfinite(net_score):raise ValueError('Net score overflow; no decision is permitted')
         passed=net_score>head['positive_gate_r']
