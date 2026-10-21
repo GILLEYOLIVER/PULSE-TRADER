@@ -15,6 +15,7 @@ from trading_assistant.v2.models import ExecutionSettings,INSTRUMENTS,Decision
 from trading_assistant.v2.strategy import Strategy
 from trading_assistant.v2.trade_learning import (TRADE_FEATURES,LOGISTIC,LOGISTIC_NET,fit_trade_model,
     classification_only_model,score_trade,validate_trade_model)
+from trading_assistant.v2.trade_learning import initial_risk_model
 from scripts.research_cycle import materialize_candidate,learned_development_task
 from trading_assistant.v2.research import atomic_json
 import test_trade_learning
@@ -26,7 +27,8 @@ class NetScoreCase(unittest.TestCase):
     def samples(self,positive=1.,negative=-10.):
         rows=test_trade_learning.TradeLearningCase().samples(count=200)
         for i,sample in enumerate(rows):
-            sample.update(features=[0.]*len(TRADE_FEATURES),label=int(i%5!=0),net=positive if i%5 else negative)
+            sample.update(features=[0.]*len(TRADE_FEATURES),label=int(i%5!=0),net=positive if i%5 else negative,
+                initial_stop_cash=10.)
         return rows
 
     def fit(self,samples=None,net=True):
@@ -105,18 +107,22 @@ class NetScoreCase(unittest.TestCase):
             self.assertEqual(parameters['trade_filter']['algorithm'],LOGISTIC_NET)
 
     def test_each_variant_records_the_checksum_of_the_model_it_actually_uses(self):
-        model=self.fit();baseline=classification_only_model(model);bars=SyntheticProvider(count=500).bars()
+        samples=self.samples();model=self.fit(samples);baseline=classification_only_model(model)
+        normalized=initial_risk_model(model,samples);bars=SyntheticProvider(count=500).bars()
         def fit(past,parameters,directory,cutoff,**kwargs):
-            atomic_json(Path(directory)/'model.json',model);return model,{'fixture':True}
+            atomic_json(Path(directory)/'model.json',model)
+            atomic_json(Path(directory)/'labels.json',{'samples':samples})
+            return model,{'fixture':True}
         with tempfile.TemporaryDirectory() as directory,patch('scripts.research_cycle.fit_entry_filter',side_effect=fit),patch(
             'scripts.research_cycle.blind_replay',return_value=(test_research_cycle.report(),[])):
             rows=learned_development_task((bars,asdict(Strategy()),None,directory))
-            self.assertEqual(len(rows),8)
+            self.assertEqual(len(rows),12)
             for row in rows:
-                expected=model if row['learning']['kind']=='trade_outcome_logistic_net' else baseline
+                expected={'trade_outcome_logistic':baseline,'trade_outcome_logistic_net':model,
+                    'trade_outcome_logistic_initial_risk':normalized}[row['learning']['kind']]
                 for record in row['training']:
                     self.assertEqual(record['model_sha256'],expected['sha256'])
-                    filename='model.json' if expected is model else 'classification-only-model.json'
+                    filename='model.json' if expected is model else 'initial-risk-model.json' if expected is normalized else 'classification-only-model.json'
                     saved=json.loads((Path(directory)/f"fold-{record['fold']}"/filename).read_text(encoding='utf-8'))
                     self.assertEqual(saved['sha256'],record['model_sha256'])
 

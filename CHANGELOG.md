@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an experimental net/actual-initial-stop-risk target, preserving the classifier and both older model variants. Record initial cash risk only on resolved labels, retain gap tails, validate target units and preregister at most 24 learned variants for future batches. Current frozen batches remain unchanged.
+- Sort only pending entries and cache pure timestamp-to-session-period conversion, without caching mutable balances or changing the financial rules.
+
 - Use one actual-fill cash model for risk sizing, pending reservations, remaining stop loss, net target, execution and blind audit. Correct proportional fees on adverse stop exits and reserve the tick-rounded entry; preserve actual losses when an exit gaps beyond the stop.
 - Refresh legacy pending reservations transactionally and add seven risk regressions plus reproducible 10,000-case synthetic accounting stress. Existing frozen market batches and reports are preserved.
 

@@ -24,7 +24,7 @@ from trading_assistant.v2.research_history import get_research_history,check_res
 from trading_assistant.v2.market_data import DataUnavailable,TransientDataUnavailable,ProviderBackoffRequired
 from trading_assistant.v2.suggestions import history_digest
 from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model,
-    training_sample_health,classification_only_model)
+    training_sample_health,classification_only_model,initial_risk_model)
 
 
 METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
@@ -73,7 +73,8 @@ def teacher_prefix_task(task):
             'parameters':asdict(Strategy(**base_parameters(parameters))),'cutoff':bars[lo].ts.isoformat()}}
 
 
-def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_net_head=False):
+def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_net_head=False,with_initial_risk=False):
+    if with_initial_risk and not with_net_head:raise ValueError('Initial-risk target requires the net head')
     base=base_parameters(parameters);strategy=Strategy(**base)
     limits,costs,specs=research_assumptions(bars[0].symbol)
     if teacher_data is None:samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs)
@@ -86,13 +87,14 @@ def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_n
     model=fit_trade_model(samples,parameters=asdict(strategy),symbol=bars[0].symbol,seconds=bars[0].seconds,
         source=bars[0].source,cutoff=cutoff,costs=costs,instrument=specs[bars[0].symbol],dataset_sha256=history_digest(bars),
         with_net_head=with_net_head,risk_budget=limits.capital*limits.risk_fraction if with_net_head else None)
+    if with_initial_risk:model=initial_risk_model(model,samples)
     atomic_json(directory/'model.json',model)
     return model,diagnostics
 
 
 def learned_development_task(task):
     bars,parameters,after,directory,*preflight=task;thresholds=(.55,.65,.8,.9)
-    kinds=('trade_outcome_logistic','trade_outcome_logistic_net')
+    kinds=('trade_outcome_logistic','trade_outcome_logistic_net','trade_outcome_logistic_initial_risk')
     reports={(kind,threshold):[] for kind in kinds for threshold in thresholds};training=[]
     def training_for(kind):
         return [{**row,'model_sha256':row['model_sha256_by_variant'][kind]} for row in training]
@@ -108,11 +110,15 @@ def learned_development_task(task):
                 result.append(row)
             return result
         baseline=classification_only_model(model)
-        training.append({'fold':index,'model_sha256_by_variant':{kinds[0]:baseline['sha256'],kinds[1]:model['sha256']},
+        samples=json.loads((Path(directory)/f'fold-{index}'/'labels.json').read_text(encoding='utf-8'))['samples']
+        normalized=initial_risk_model(model,samples)
+        models={kinds[0]:baseline,kinds[1]:model,kinds[2]:normalized}
+        training.append({'fold':index,'model_sha256_by_variant':{kind:value['sha256'] for kind,value in models.items()},
             'cutoff':model['training_cutoff'],'training_samples':model['training_samples'],'teacher':diagnostics})
         atomic_json(Path(directory)/f'fold-{index}'/'classification-only-model.json',baseline)
+        atomic_json(Path(directory)/f'fold-{index}'/'initial-risk-model.json',normalized)
         for kind,threshold in reports:
-            strategy=Strategy(**base,trade_filter=model if kind=='trade_outcome_logistic_net' else baseline,
+            strategy=Strategy(**base,trade_filter=models[kind],
                 trade_score_threshold=threshold)
             report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-RESEARCH_WARMUP):lo],strategy=strategy,
                 limits=limits,costs=costs,instruments=specs,retain_trace=False,bootstrap=False)
@@ -128,7 +134,8 @@ def learned_development_task(task):
 def materialize_candidate(winner,training,directory,cutoff):
     if not winner.get('learning'):return asdict(Strategy(**winner['parameters']))
     model,_=fit_entry_filter(training,winner['parameters'],Path(directory)/'trade-models'/'final',cutoff,
-        with_net_head=winner['learning'].get('kind')=='trade_outcome_logistic_net')
+        with_net_head=winner['learning'].get('kind') in ('trade_outcome_logistic_net','trade_outcome_logistic_initial_risk'),
+        with_initial_risk=winner['learning'].get('kind')=='trade_outcome_logistic_initial_risk')
     return asdict(Strategy(**base_parameters(winner['parameters']),trade_filter=model,
         trade_score_threshold=winner['learning']['threshold']))
 
@@ -203,8 +210,8 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'mean_reversion_confirmation':'higher SMA50/200 alignment and close on same side of SMA200',
         'daily_grid':'unchanged; insufficient prefix for 200 higher candles in early folds'}
     plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
-        'model_variants':['trade_outcome_logistic','trade_outcome_logistic_net'],
-        'maximum_validated_variants':16,'net_gate':'additional fixed positive net-risk score; training data only',
+        'model_variants':['trade_outcome_logistic','trade_outcome_logistic_net','trade_outcome_logistic_initial_risk'],
+        'maximum_validated_variants':24,'net_gate':'positive net / budget or actual initial stop cash; training data only',
         'teacher_prefix_preflight':{'maximum_ranked_bases':6,'selected_eligible_bases':2,
             'uses_only':'natural labels realized before the first validation fold; no model score selection'},
         'minimum_resolved_training_trades':100,'minimum_each_net_outcome':20,
@@ -345,7 +352,7 @@ def main():
             output=Path(args.output)/cycle_id;output.mkdir(parents=True)
             summary={'cycle_id':cycle_id,'code_id':code_id,'groups':[],'goal_reached':False,'mode':'PAPER','status':'IN_PROGRESS'}
             atomic_json(output/'batch-before-results.json',{'groups':args.groups,'technical_candidates_per_group':args.candidates,
-                'maximum_trade_filter_candidates_per_group':16,
+                'maximum_trade_filter_candidates_per_group':24,
                 'maximum_teacher_prefix_preflights_per_group':6,
                 'workers':args.workers,'code_id':code_id,'started_at':cycle_id})
             provider_deferred=False

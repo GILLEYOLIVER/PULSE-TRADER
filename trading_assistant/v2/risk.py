@@ -1,8 +1,17 @@
 from __future__ import annotations
 import math
 from datetime import datetime
+from functools import lru_cache
 from .models import Decision,Instrument,Limits,ExecutionSettings,aware,finite
 from .session import local_time
+
+
+@lru_cache(maxsize=8192)
+def timestamp_periods(value):
+    """Cache only pure date conversion; never cache balances or mutable state."""
+    day=local_time(datetime.fromisoformat(value)).date()
+    return day,day.isocalendar()[:2],(day.year,day.month)
+
 
 class RiskManager:
     def __init__(self,limits: Limits,costs: ExecutionSettings,calendar=None):
@@ -13,10 +22,10 @@ class RiskManager:
         day=local_time(now).date(); week=day.isocalendar()[:2]
         pnl={"day":0.,"week":0.,"month":0.}
         for trade in s["trades"]:
-            d=local_time(datetime.fromisoformat(trade["closed_at"])).date()
+            d,trade_week,trade_month=timestamp_periods(trade['closed_at'])
             if d==day: pnl["day"]+=trade["net"]
-            if d.isocalendar()[:2]==week: pnl["week"]+=trade["net"]
-            if (d.year,d.month)==(day.year,day.month): pnl["month"]+=trade["net"]
+            if trade_week==week: pnl["week"]+=trade["net"]
+            if trade_month==(day.year,day.month): pnl["month"]+=trade["net"]
         # Entry fees are immediately charged; remaining liquidation costs also reserved.
         unrealized=0.;worst=0.
         for p in s["positions"].values():
@@ -84,7 +93,7 @@ class RiskManager:
         if any(p["symbol"]==d.symbol for p in positions) or any(o["symbol"]==d.symbol for o in pending): return 0,"Existing exposure for symbol"
         if len(positions)+len(pending)>=l.max_positions: return 0,"Maximum positions"
         day=local_time(now).date()
-        today=sum(local_time(datetime.fromisoformat(o.get("filled_at",o["created_at"]))).date()==day for o in s["orders"].values() if o["status"] in ("FILLED","PARTIAL","CLOSED"))
+        today=sum(timestamp_periods(o.get('filled_at',o['created_at']))[0]==day for o in s['orders'].values() if o['status'] in ('FILLED','PARTIAL','CLOSED'))
         if today+len(pending)>=l.max_trades: return 0,"Daily trade count"
         try:
             cash_risk=c.stop_loss(entry,d.stop,d.side,spec.point_value,spec.tick)

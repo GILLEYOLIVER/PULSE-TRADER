@@ -1,5 +1,9 @@
 # Experimento de pontuação líquida por risco
 
+A hipótese posterior de [caixa por risco inicial executado](INITIAL_RISK_PROTOCOL.md) acrescenta uma
+terceira variante somente em fontes futuras. Os modelos e resultados deste experimento mantêm suas
+unidades originais; o orçamento máximo não é reinterpretado como risco efetivamente preenchido.
+
 ## Hipótese
 
 Uma operação vencedora pequena e uma perdedora grande têm rótulos 1 e 0, mas efeitos financeiros diferentes. A candidata BTC anterior que acertou 12 de 20 operações perdeu 364,78 USDT. Esse resultado não basta para atribuir a causa a um fator único; motiva comparar um filtro que também aprende a magnitude líquida das operações passadas.
