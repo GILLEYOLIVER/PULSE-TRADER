@@ -23,7 +23,8 @@ def metrics(trades,capital,equity=None):
         "net":sum(results),"fees":sum(t["fees"] for t in trades),"max_drawdown":dd,
         "return_fraction":sum(results)/capital,"profit_factor_note":"undefined without losing trades" if not losses else ""}
 
-def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None,*,durable=False,collect_trade_features=False):
+def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None,*,durable=False,
+    collect_trade_features=False,trade_feature_set='trade_context_v1'):
     if not bars: raise ValueError("No data")
     previous={};sources={};timeframes={}
     for b in bars:
@@ -51,12 +52,14 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
         decisions=engine.on_bars(group)
         state=ledger.read()
         if collect_trade_features:
-            from .trade_learning import trade_features
+            from .trade_learning import trade_features,LEGACY_TRADE_SET
             for decision in decisions:
                 if decision is not None and decision.side!='WAIT':
                     key=engine.decision_key(decision);order=state['orders'].get(key)
                     if order is not None and order['qty']>0:
-                        entry_context[key]={'features':trade_features(decision,engine.history[decision.symbol],engine.costs,engine.specs[decision.symbol]),
+                        args=(decision,engine.history[decision.symbol],engine.costs,engine.specs[decision.symbol])
+                        vector=trade_features(*args) if trade_feature_set==LEGACY_TRADE_SET else trade_features(*args,feature_set=trade_feature_set)
+                        entry_context[key]={'features':vector,
                             'signal_at':decision.ts.isoformat()}
         b=group[0]
         _,unrealized,_=engine.risk.period_pnl(state,b.ts+timedelta(seconds=b.seconds))

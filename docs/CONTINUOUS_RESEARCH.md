@@ -1,5 +1,12 @@
 # Ciclo de pesquisa do PULSE
 
+A hipótese de [contexto de médias móveis nos filtros](MA_CONTEXT_PROTOCOL.md) usa
+SMA50/200, inclinações e contexto de volatilidade no aprendizado determinístico. Modelos antigos
+mantêm suas 18 características; o novo esquema tem 26 e o máximo continua 24 variantes aprendidas.
+Disponibilidade do recurso não representa vantagem comprovada nem adoção na interface.
+O ensaio conhecido piorou os resultados: o padrão da pesquisa permanece no esquema anterior de 18;
+o novo exige escolha explícita antes do lote, conforme o protocolo.
+
 ## Missão e medida
 
 Buscar mais de 90% de operações encerradas com resultado líquido positivo, após os custos declarados. A porcentagem refere-se a operações, não a candles previstos ou testes de software. A meta pode não ser alcançável; não será declarada sem resultados. Não há execução real.
