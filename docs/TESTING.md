@@ -9,7 +9,11 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-141 tests passed without skips. Multi-timeframe coverage verifies partial-bucket exclusion,
+151 tests passed without skips. Larger-history coverage verifies chunk boundaries, interrupted-download
+recovery, corruption rejection without silent replacement, whole-window gap counts, future/size/disk guards
+and unchanged normal-provider limits. Teacher-prefix coverage verifies pre-validation-only inputs,
+minimum sample/class counts, identical cached model fitting and rejection of mismatched data or parameters.
+Multi-timeframe coverage verifies partial-bucket exclusion,
 both-direction regime confirmation, unchanged proposal prices/stops/targets, enough retained context,
 history-only warmup and bounded opt-in research grids. Archived-reference coverage verifies execution of different preserved
 source implementations, exact financial/decision equivalence, source corruption rejection, reference

@@ -12,6 +12,7 @@ from trading_assistant.v2.data import SyntheticProvider
 from trading_assistant.v2.models import ExecutionSettings,Limits,INSTRUMENTS
 from trading_assistant.v2.research import ChampionStore
 from trading_assistant.v2.strategy import Strategy
+from trading_assistant.v2.research_history import MAX_RESEARCH_BARS
 from scripts.research_cycle import window_sizes
 
 
@@ -76,14 +77,14 @@ class ArchivedReplayCase(unittest.TestCase):
             store.set_champion(state,group,versions[1],'UNKNOWN_OVERRIDE')
             with self.assertRaises(ValueError):store.validated_reference(state,group)
 
-    def test_longer_external_windows_fit_provider_candle_limit_with_context(self):
+    def test_segmented_training_and_external_windows_are_bounded(self):
         for symbol in ('BTCUSDT','SOLUSDT'):
             for seconds in (300,3600,86400):
                 training,testing=window_sizes(symbol,seconds)
-                self.assertLessEqual(training*86400/seconds,10000)
+                self.assertLessEqual(training*86400/seconds,MAX_RESEARCH_BARS)
                 self.assertLess((testing+1)*86400/seconds+250,10000)
-        self.assertEqual(window_sizes('BTCUSDT',300),(30,28))
-        self.assertEqual(window_sizes('BTCUSDT',3600),(365,90))
+        self.assertEqual(window_sizes('BTCUSDT',300),(90,28))
+        self.assertEqual(window_sizes('BTCUSDT',3600),(540,90))
 
 
 if __name__=='__main__':unittest.main()

@@ -33,6 +33,15 @@ def trade_features(decision,bars,costs,instrument):
     return [max(-50.,min(50.,float(value))) for value in x]
 
 
+def training_sample_health(samples):
+    recent=sorted(samples,key=lambda s:s['signal_at'])[-3000:]
+    if any(type(s['label']) is not int or s['label'] not in (0,1) for s in recent):
+        raise ValueError('Invalid natural-trade outcome label')
+    wins=sum(s['label'] for s in recent);losses=len(recent)-wins
+    return {'samples':len(recent),'positive':wins,'nonpositive':losses,
+        'eligible':len(recent)>=100 and min(wins,losses)>=20}
+
+
 def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,instrument,dataset_sha256):
     cutoff=aware(cutoff);seen=set();clean=[]
     for sample in samples:
@@ -48,8 +57,8 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
         clean.append(sample)
     clean.sort(key=lambda s:s['signal_at'])
     clean=clean[-3000:]
-    wins=sum(s['label'] for s in clean)
-    if len(clean)<100 or min(wins,len(clean)-wins)<20:
+    health=training_sample_health(clean);wins=health['positive']
+    if not health['eligible']:
         raise InsufficientTradeData('At least 100 closed natural trades and 20 of each net outcome required')
     width=len(TRADE_FEATURES)
     means=[mean(s['features'][j] for s in clean) for j in range(width)]

@@ -20,8 +20,9 @@ from trading_assistant.v2.models import UTC,Instrument
 from trading_assistant.v2.research import (RESEARCH_WARMUP,ChampionStore,aggregate_metrics,atomic_json,candidate_bank,
     development_result,development_slices,goal_evidence,plan_forward,promotion_decision,select_development,warmup_start)
 from trading_assistant.v2.strategy import Strategy
+from trading_assistant.v2.research_history import get_research_history
 from trading_assistant.v2.suggestions import history_digest
-from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model)
+from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model,training_sample_health)
 
 
 METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
@@ -31,7 +32,7 @@ GROUPS=('BTCUSDT:300','ETHUSDT:300','BNBUSDT:300','SOLUSDT:300',
 
 
 def window_sizes(symbol,seconds):
-    return (30,28) if seconds==300 else (365,90) if seconds==3600 else (365 if symbol in ('BTCUSDT','ETHUSDT') else 1460,90)
+    return (90,28) if seconds==300 else (540,90) if seconds==3600 else (1460,90)
 
 
 def research_assumptions(symbol):
@@ -56,10 +57,28 @@ def development_task(task):
     return development_result(parameters,reports)
 
 
-def fit_entry_filter(bars,parameters,directory,cutoff):
+def teacher_prefix_task(task):
+    bars,parameters,after,directory=task;folds=development_slices(bars,after)
+    if not folds:return {'parameters':parameters,'eligible':False,'reason':'no_compatible_temporal_folds'}
+    lo=folds[0][0];past=bars[:lo];limits,costs,specs=research_assumptions(bars[0].symbol)
+    samples,diagnostics=collect_trade_samples(past,Strategy(**base_parameters(parameters)),limits,costs,specs)
+    health=training_sample_health(samples);path=Path(directory)/'prefix-labels.json'
+    atomic_json(path,{'samples':samples,'teacher':diagnostics,'cutoff':bars[lo].ts.isoformat(),
+        'dataset_sha256':history_digest(past),'sample_health':health})
+    return {'parameters':parameters,'eligible':health['eligible'],'sample_health':health,
+        'prefix_cutoff':bars[lo].ts.isoformat(),'path':str(path),
+        'teacher_data':{'samples':samples,'diagnostics':diagnostics,'dataset_sha256':history_digest(past),
+            'parameters':asdict(Strategy(**base_parameters(parameters))),'cutoff':bars[lo].ts.isoformat()}}
+
+
+def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None):
     base=base_parameters(parameters);strategy=Strategy(**base)
     limits,costs,specs=research_assumptions(bars[0].symbol)
-    samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs)
+    if teacher_data is None:samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs)
+    else:
+        if (teacher_data['dataset_sha256']!=history_digest(bars) or teacher_data['parameters']!=asdict(strategy)
+            or teacher_data['cutoff']!=cutoff.isoformat()):raise ValueError('Teacher prefix belongs to another dataset, policy or cutoff')
+        samples,diagnostics=teacher_data['samples'],teacher_data['diagnostics']
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     atomic_json(directory/'labels.json',{'samples':samples,'teacher':diagnostics,'cutoff':cutoff.isoformat()})
     model=fit_trade_model(samples,parameters=asdict(strategy),symbol=bars[0].symbol,seconds=bars[0].seconds,
@@ -69,11 +88,12 @@ def fit_entry_filter(bars,parameters,directory,cutoff):
 
 
 def learned_development_task(task):
-    bars,parameters,after,directory=task;thresholds=(.55,.65,.8,.9)
+    bars,parameters,after,directory,*preflight=task;thresholds=(.55,.65,.8,.9)
     reports={threshold:[] for threshold in thresholds};training=[]
     base=base_parameters(parameters);limits,costs,specs=research_assumptions(bars[0].symbol)
     for index,(lo,hi) in enumerate(development_slices(bars,after),1):
-        try:model,diagnostics=fit_entry_filter(bars[:lo],base,Path(directory)/f'fold-{index}',bars[lo].ts)
+        try:model,diagnostics=fit_entry_filter(bars[:lo],base,Path(directory)/f'fold-{index}',bars[lo].ts,
+            teacher_data=preflight[0] if index==1 and preflight else None)
         except InsufficientTradeData as error:
             result=[]
             for threshold in thresholds:
@@ -172,6 +192,8 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'mean_reversion_confirmation':'higher SMA50/200 alignment and close on same side of SMA200',
         'daily_grid':'unchanged; insufficient prefix for 200 higher candles in early folds'}
     plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
+        'teacher_prefix_preflight':{'maximum_ranked_bases':6,'selected_eligible_bases':2,
+            'uses_only':'natural labels realized before the first validation fold; no model score selection'},
         'minimum_resolved_training_trades':100,'minimum_each_net_outcome':20,
         'fold_models_trained_only_before_validation':'labels must already be realized',
         'common_development_after':development_after,'score_is_calibrated_probability':False}
@@ -180,7 +202,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     rotation.reserve(cycle_id,symbol,seconds,window['test_start'],window['test_end'])
     state['groups'][group]['last_external_end']=window['test_end'];store.save(state)
     print(group+': downloading development '+window['training_start']+' / '+window['test_start'],flush=True)
-    training=get_data(symbol,seconds,window['training_start'],window['test_start'],group_dir,allow_gaps=True)
+    training=get_research_history(symbol,seconds,window['training_start'],window['test_start'],group_dir)
     if any(b.source!='BINANCE_SPOT_USDT' for b in training):raise ValueError('Unexpected research data origin')
     rotation.mark_development(symbol,seconds,window['training_start'],window['test_start'],history_digest(training))
     atomic_json(group_dir/'development-data.json',{'sha256':history_digest(training),'candles':len(training)})
@@ -189,9 +211,15 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         for index,result in enumerate(pool.map(development_task,[(training,p,development_after) for p in bank]),1):
             results.append(result)
             print(f'{group}: development {index}/{len(bank)}; trades={result["aggregate"]["trades"]}; eligible={result["eligible"]}',flush=True)
-        seeds=sorted((row for row in results if row['parameters'].get('trade_filter') is None and row['aggregate']['trades']>=30),
-            key=lambda row:tuple(row['selection_key']),reverse=True)[:2]
-        tasks=[(training,row['parameters'],development_after,group_dir/'trade-models'/digest(base_parameters(row['parameters']))) for row in seeds]
+        ranked=sorted((row for row in results if row['parameters'].get('trade_filter') is None and row['aggregate']['trades']>=30),
+            key=lambda row:tuple(row['selection_key']),reverse=True)[:6]
+        prefix_tasks=[(training,row['parameters'],development_after,
+            group_dir/'teacher-prefixes'/digest(base_parameters(row['parameters']))) for row in ranked]
+        preflight=list(pool.map(teacher_prefix_task,prefix_tasks))
+        atomic_json(group_dir/'teacher-prefix-eligibility.json',[{k:v for k,v in row.items() if k!='teacher_data'} for row in preflight])
+        seeds=[row for row in preflight if row['eligible']][:2]
+        tasks=[(training,row['parameters'],development_after,group_dir/'trade-models'/digest(base_parameters(row['parameters'])),
+            row['teacher_data']) for row in seeds]
         for index,learned in enumerate(pool.map(learned_development_task,tasks),1):
             results.extend(learned)
             print(f'{group}: learned base {index}/{len(seeds)}; eligible thresholds={sum(row["eligible"] for row in learned)}',flush=True)
@@ -237,6 +265,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     active_version=candidate_id if promotion['promoted'] else reference_id
     evidence=goal_evidence([row for row in state['evaluations']+confirmations if row['version_id']==active_version])
     row={'group':group,'status':'COMPLETED','reference_id':reference_id,'candidate_id':candidate_id,
+        'teacher_prefixes_evaluated':len(preflight),
         'reference_provenance':control_provenance,'comparison_contract':contract,
         'selection':selection,'development':winner,'external':c,'reference_external':r,'double_costs':s,
         'reference_double_costs':rs,'promotion':promotion,'goal':evidence,'development_candidates':len(results),
@@ -302,11 +331,19 @@ def main():
             summary={'cycle_id':cycle_id,'code_id':code_id,'groups':[],'goal_reached':False,'mode':'PAPER','status':'IN_PROGRESS'}
             atomic_json(output/'batch-before-results.json',{'groups':args.groups,'technical_candidates_per_group':args.candidates,
                 'maximum_trade_filter_candidates_per_group':8,
+                'maximum_teacher_prefix_preflights_per_group':6,
                 'workers':args.workers,'code_id':code_id,'started_at':cycle_id})
             for group in args.groups:
                 try:row=run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id)
                 except Exception as error:
                     row={'group':group,'status':'FAILED','error_type':type(error).__name__,'detail':str(error)}
+                    failed_dir=output/group.replace(':','-')
+                    if failed_dir.exists():
+                        atomic_json(failed_dir/'failure.json',row)
+                        atomic_json(store.directory/'runs'/(cycle_id+'-'+failed_dir.name+'.failure.json'),row)
+                        archive=store.directory/'runs'/(cycle_id+'-'+failed_dir.name+'.zip')
+                        try:row['runtime_archive']=str(archive.resolve()) if archive.exists() else store.archive_run(failed_dir)
+                        except Exception as archive_error:row['archive_error']=str(archive_error)
                     print(json.dumps(row),flush=True)
                 summary['groups'].append(row)
                 # All tracked markets/profiles must qualify; one lucky asset cannot end the full mission.

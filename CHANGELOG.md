@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add resumable, checked research histories in bounded chunks, whole-interval coverage validation, past-window and free-space guards, and preserved failed-run bundles.
+- Preregister longer development windows and verify natural-trade sample/class sufficiency before selecting at most two learned bases; reuse only identical checked first-prefix data.
+
 - Add preregistered multi-timeframe variants for future intraday research, apply the optional higher SMA50/200 confirmation to mean reversion, and retain enough base history for 200 complete higher candles at partial bucket edges.
 - Increase future research context to 1,024 prior candles without changing open frozen batches or financial qualification gates.
 
