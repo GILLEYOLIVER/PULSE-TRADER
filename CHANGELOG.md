@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add preregistered multi-timeframe variants for future intraday research, apply the optional higher SMA50/200 confirmation to mean reversion, and retain enough base history for 200 complete higher candles at partial bucket edges.
+- Increase future research context to 1,024 prior candles without changing open frozen batches or financial qualification gates.
+
 - Execute preserved references in isolated interpreters with their original algorithms, parameters and assumptions; restore unvalidated source rebases without deleting history and verify equal capital/risk/cost/instrument units.
 - Preregister larger future external windows (28 days for five-minute candles, 90 days for hourly candles) while retaining all existing sample and financial gates.
 

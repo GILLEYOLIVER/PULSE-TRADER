@@ -9,7 +9,9 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-135 tests passed without skips. Archived-reference coverage verifies execution of different preserved
+141 tests passed without skips. Multi-timeframe coverage verifies partial-bucket exclusion,
+both-direction regime confirmation, unchanged proposal prices/stops/targets, enough retained context,
+history-only warmup and bounded opt-in research grids. Archived-reference coverage verifies execution of different preserved
 source implementations, exact financial/decision equivalence, source corruption rejection, reference
 restoration after unvalidated rebases, and rejection of changed capital/risk/cost/unit assumptions.
 Trade-outcome coverage includes realized-label availability,

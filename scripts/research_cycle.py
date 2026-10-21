@@ -17,7 +17,7 @@ from trading_assistant.v2.archived_replay import archived_replay,comparison_cont
 from trading_assistant.v2.blind_testing import blind_replay
 from trading_assistant.v2.learning import HistoricalRotation,LearningMemory,digest
 from trading_assistant.v2.models import UTC,Instrument
-from trading_assistant.v2.research import (ChampionStore,aggregate_metrics,atomic_json,candidate_bank,
+from trading_assistant.v2.research import (RESEARCH_WARMUP,ChampionStore,aggregate_metrics,atomic_json,candidate_bank,
     development_result,development_slices,goal_evidence,plan_forward,promotion_decision,select_development,warmup_start)
 from trading_assistant.v2.strategy import Strategy
 from trading_assistant.v2.suggestions import history_digest
@@ -49,7 +49,7 @@ def development_task(task):
     bars,parameters,after=task;limits,costs,specs=research_assumptions(bars[0].symbol)
     reports=[]
     for lo,hi in development_slices(bars,after):
-        report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-250):lo],
+        report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-RESEARCH_WARMUP):lo],
             strategy=Strategy(**parameters),limits=limits,costs=costs,instruments=specs,
             retain_trace=False,bootstrap=False)
         reports.append(report)
@@ -85,7 +85,7 @@ def learned_development_task(task):
             'training_samples':model['training_samples'],'teacher':diagnostics})
         for threshold in thresholds:
             strategy=Strategy(**base,trade_filter=model,trade_score_threshold=threshold)
-            report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-250):lo],strategy=strategy,
+            report,_=blind_replay(iter(bars[lo:hi]),warmup=bars[max(0,lo-RESEARCH_WARMUP):lo],strategy=strategy,
                 limits=limits,costs=costs,instruments=specs,retain_trace=False,bootstrap=False)
             reports[threshold].append(report)
     result=[]
@@ -156,7 +156,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         store.set_champion(state,group,reference_id,'INITIAL_REFERENCE');store.save(state)
     count=previous.get('cycles',0)
     development_after=(parameters.get('trade_filter') or {}).get('training_cutoff')
-    bank=candidate_bank(count,parameters,args.candidates)
+    bank=candidate_bank(count,parameters,args.candidates,allow_multi_timeframe=seconds in (300,3600))
     plan={'cycle_id':cycle_id,'group':group,'windows':window,'code_id':code_id,
         'reference_id':reference_id,'reference_code_id':original_reference['code_id'],
         'reference_execution':'original archived source and original assumptions',
@@ -166,7 +166,11 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'goal':'same version; >=3 distinct real windows; >=100 trades total; >90% each; positive net and double-cost stress',
         'promotion':'preselected challenger only; >=10 external trades; better net and nonworse accuracy than reference; positive double-cost net; drawdown <=10%',
         'desktop_adoption':False}
-    plan['required_external_warmup_bars']=250
+    plan['required_external_warmup_bars']=RESEARCH_WARMUP
+    plan['multi_timeframe_experiment']={'enabled_in_candidate_grid':seconds in (300,3600),
+        'factor':5,'incomplete_higher_candles':'excluded; no future closing prices',
+        'mean_reversion_confirmation':'higher SMA50/200 alignment and close on same side of SMA200',
+        'daily_grid':'unchanged; insufficient prefix for 200 higher candles in early folds'}
     plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
         'minimum_resolved_training_trades':100,'minimum_each_net_outcome':20,
         'fold_models_trained_only_before_validation':'labels must already be realized',
@@ -210,10 +214,10 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         for row in results:
             m=row['aggregate'];writer.writerow((json.dumps(row['parameters']),json.dumps(row.get('learning')),row['eligible'],m['trades'],m['wins'],m['win_rate'],m['net'],m['max_window_drawdown']))
     start=datetime.fromisoformat(window['test_start']).replace(tzinfo=UTC)
-    context_start=warmup_start(start,seconds)
+    context_start=warmup_start(start,seconds,RESEARCH_WARMUP)
     full=get_data(symbol,seconds,context_start,window['test_end'],group_dir,allow_gaps=True)
-    warmup=[b for b in full if b.ts<start][-250:];testing=[b for b in full if b.ts>=start]
-    if len(warmup)<250:raise ValueError('Contexto anterior insuficiente; a avaliação não começa consumindo candles do teste como aquecimento')
+    warmup=[b for b in full if b.ts<start][-RESEARCH_WARMUP:];testing=[b for b in full if b.ts>=start]
+    if len(warmup)<RESEARCH_WARMUP:raise ValueError('Contexto anterior insuficiente; a avaliação não começa consumindo candles do teste como aquecimento')
     c=external_run(testing,warmup,selected_parameters,group,group_dir,'candidate')
     s=external_run(testing,warmup,selected_parameters,group,group_dir,'double-costs',stress=True)
     if candidate_id==reference_id:r,rs=c,s;control_provenance={'same_version_as_candidate':True}
@@ -227,7 +231,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         if any(row['version_id']==version for row in confirmations):continue
         confirmations.append({'group':group,'version_id':version,'start':window['test_start'],'end':window['test_end'],
             'cycle_id':cycle_id,'role':role,'real_history':all(b.source=='BINANCE_SPOT_USDT' for b in testing),
-            'warmup_bars':len(warmup),'qualified_for_goal':len(warmup)>=250,
+            'warmup_bars':len(warmup),'qualified_for_goal':len(warmup)>=RESEARCH_WARMUP,
             'passed':all(x['passed'] for x in (report,stress)),'metrics':report['metrics'],'stress_net':stress['metrics']['net'],
             'stress_drawdown':stress['metrics']['max_drawdown'],'dataset_sha256':history_digest(testing)})
     active_version=candidate_id if promotion['promoted'] else reference_id

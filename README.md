@@ -34,6 +34,8 @@ nenhuma porcentagem é garantida. A execução continua exclusivamente PAPER.
 O experimento de [aprendizado com operações encerradas](docs/TRADE_MODEL_PROTOCOL.md)
 usa resultados líquidos anteriores para filtrar entradas. Ele tem cortes temporais,
 amostra mínima e validação posterior; sua pontuação interna não é probabilidade de acerto.
+O próximo [experimento multitemporal](docs/MULTI_TIMEFRAME_PROTOCOL.md) compara as entradas
+com confirmação das médias em um prazo maior, usando somente candles encerrados.
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.research_cycle --plan-only

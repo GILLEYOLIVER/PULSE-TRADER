@@ -14,6 +14,8 @@ from pathlib import Path
 from .learning import digest
 from .strategy import Strategy
 
+RESEARCH_WARMUP=1024
+
 
 def atomic_json(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -133,14 +135,15 @@ def goal_evidence(records):
         'meaning':'Observed closed-operation results only; no guaranteed future accuracy or multiple-testing-adjusted inference'}
 
 
-def candidate_bank(cycle_index,reference,limit=30):
+def candidate_bank(cycle_index,reference,limit=30,*,allow_multi_timeframe=False):
     """Rotate an a-priori bounded grid; external outcomes do not set thresholds."""
     methods=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
     filters=({},
         {'min_trend_atr':.35,'min_efficiency':.2,'min_relative_volume':.8,'max_entry_atr':1.5,'require_trend_slope':True},
         {'min_trend_atr':.65,'min_efficiency':.35,'min_relative_volume':1.,'max_entry_atr':1.,'require_trend_slope':True})
-    bank=[asdict(Strategy(method,reward,stop,**filter_config)) for reward in (.5,1.,1.25,2.,3.)
-        for stop in (1.5,2.5) for filter_config in filters for method in methods]
+    bank=[asdict(Strategy(method,reward,stop,multi_timeframe=multi,**filter_config)) for reward in (.5,1.,1.25,2.,3.)
+        for stop in (1.5,2.5) for filter_config in filters for method in methods
+        for multi in ((False,True) if allow_multi_timeframe else (False,))]
     bank=[bank[(i*37)%len(bank)] for i in range(len(bank))]
     offset=(cycle_index*limit)%len(bank);rotated=bank[offset:]+bank[:offset]
     result=[];seen=set()

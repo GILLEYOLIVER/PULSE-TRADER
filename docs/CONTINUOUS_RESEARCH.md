@@ -28,7 +28,7 @@ Ausências reais de candles são registradas no manifesto e preservadas sem pree
 
 ## Critério de meta
 
-A iteração de aprendizado com operações encerradas segue [o protocolo do filtro de entradas](TRADE_MODEL_PROTOCOL.md). São no máximo oito candidatas adicionais por grupo, com pontuação não calibrada, modelos ajustados somente no passado de cada bloco e os mesmos critérios financeiros. O desenvolvimento usa 30 dias em cinco minutos e 365 dias em uma hora; o contexto externo exige 250 candles para todos os períodos.
+A iteração de aprendizado com operações encerradas segue [o protocolo do filtro de entradas](TRADE_MODEL_PROTOCOL.md). São no máximo oito candidatas adicionais por grupo, com pontuação não calibrada, modelos ajustados somente no passado de cada bloco e os mesmos critérios financeiros. O desenvolvimento usa 30 dias em cinco minutos e 365 dias em uma hora. O contexto externo inicialmente exigia 250 candles; os próximos lotes da [iteração multitemporal](MULTI_TIMEFRAME_PROTOCOL.md) exigem 1.024 e incluem variantes com confirmação por prazo maior, sem alterar rodadas abertas.
 
 Uma porcentagem isolada acima de 90% não encerra a missão. A mesma versão congelada precisa de pelo menos três janelas externas distintas, somando pelo menos 100 operações, mais de 90% de operações lucrativas em cada janela, lucro líquido em cada janela e resultado positivo com custos dobrados. O relatório mostra intervalo de Wilson descritivo e número de tentativas. Não é garantia de probabilidade futura, nem um teste estatístico corrigido por todas as escolhas de pesquisa.
 
