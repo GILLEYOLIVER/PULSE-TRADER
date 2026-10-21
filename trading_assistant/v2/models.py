@@ -153,6 +153,37 @@ class ExecutionSettings:
     def fee(self,price,point_value,quantity=1):
         return quantity*(self.fee_per_unit+abs(price*point_value)*self.fee_bps/10000.)
 
+    def entry_price(self,quote,side,tick):
+        if side not in ('BUY','SELL') or not finite(quote,tick) or min(quote,tick)<=0:
+            raise ValueError('Invalid entry pricing inputs')
+        direction=1 if side=='BUY' else -1
+        raw=quote+direction*(self.spread_ticks/2+self.slippage_ticks)*tick
+        if not finite(raw,raw/tick) or raw<=0:raise ValueError('Adverse entry price invalid')
+        price=(math.ceil(raw/tick) if direction>0 else math.floor(raw/tick))*tick
+        if not finite(price) or price<=0:raise ValueError('Adverse entry price invalid')
+        return price
+
+    def exit_price(self,quote,side,tick):
+        if side not in ('BUY','SELL') or not finite(quote,tick) or min(quote,tick)<=0:
+            raise ValueError('Invalid exit pricing inputs')
+        price=quote-(1 if side=='BUY' else -1)*(self.spread_ticks/2+self.slippage_ticks)*tick
+        if not finite(price) or price<=0:raise ValueError('Adverse exit price invalid')
+        return price
+
+    def cashflow(self,entry,exit,side,point_value,quantity=1,*,entry_fee=None):
+        if (side not in ('BUY','SELL') or not finite(entry,exit,point_value,quantity)
+            or min(entry,exit,point_value,quantity)<=0):raise ValueError('Invalid cashflow inputs')
+        paid=self.fee(entry,point_value,quantity) if entry_fee is None else entry_fee
+        if not finite(paid) or paid<0:raise ValueError('Invalid paid entry fee')
+        gross=(exit-entry)*(1 if side=='BUY' else -1)*quantity*point_value
+        fees=paid+self.fee(exit,point_value,quantity);net=gross-fees
+        if not finite(gross,fees,net):raise ValueError('Cashflow exceeds finite numeric range')
+        return gross,fees,net
+
+    def stop_loss(self,entry,stop,side,point_value,tick,quantity=1,*,entry_fee=None):
+        price=self.exit_price(stop,side,tick)
+        return max(0.,-self.cashflow(entry,price,side,point_value,quantity,entry_fee=entry_fee)[2])
+
     def validate(self):
         if (not finite(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.participation,self.trailing_atr,self.break_even_r,self.fee_bps)
             or min(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.trailing_atr,self.break_even_r) < 0

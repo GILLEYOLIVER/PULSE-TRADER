@@ -9,7 +9,9 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-166 tests passed without skips. Net-score coverage verifies unchanged classifier results, correct per-variant
+173 tests passed without skips. Cash-risk coverage reproduces and fixes the ordinary short-stop fee
+breach, verifies rounded adverse entry reservations, filled-price semantics, remaining stop cash,
+legacy pending reservations, invalid prices and uncapped exit-gap losses. Net-score coverage verifies unchanged classifier results, correct per-variant
 model-checksum provenance, unfavorable
 cash despite high win frequency, untrimmed negative tails, zero-score numeric tolerance, integrity and
 pre-external model materialization. Provider-recovery coverage verifies bounded same-URL retries,
@@ -74,3 +76,11 @@ all evidence/calibration gates failed and no model was promoted. See UPGRADE_6_S
 Required future operational validation: licensed B3 historical data, official contract/calendar checks,
 scenario coverage for auctions/halts, larger portfolios, stress testing, dependency audit, and broker sandbox.
 The current source cannot send real orders.
+
+`python -m scripts.stress_cash_risk --cases 10000` exercises synthetic accounting with both directions,
+varying ticks, point values, lot sizes, fees, spreads, slippage, entry gaps and explicit exit gaps.
+The recorded seed 20261021 checked 5,549 accepted reservations and 5,503 closed positions: 4,949 ordinary
+stops stayed within budget and 554 exit gaps retained their full independently calculated losses,
+including 493 above budget. There were 4,451 submission rejections and 46 subsequent fill rejections.
+No accounting assertion failed. These are mechanics checks, never market win-rate or goal evidence.
+See CASH_RISK_ACCOUNTING.md for the original reproduction and reproducible report paths.

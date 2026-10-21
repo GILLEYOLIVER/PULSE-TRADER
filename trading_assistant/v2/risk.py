@@ -22,10 +22,11 @@ class RiskManager:
         for p in s["positions"].values():
             direction=1 if p["side"]=="BUY" else -1
             mark=s["marks"].get(p["symbol"],p["entry"])
-            unrealized+=(mark-p["entry"])*direction*p["qty"]*p["point_value"]-p["entry_fee"]-self.costs.fee(mark,p["point_value"],p["qty"])
-            distance=max(0,(mark-p["stop"])*direction)
-            worst+=distance*p["qty"]*p["point_value"]+p["qty"]*(self.costs.slippage_ticks+self.costs.spread_ticks/2)*p["tick"]*p["point_value"]
-            worst+=max(0,self.costs.fee(p['stop'],p['point_value'],p['qty'])-self.costs.fee(mark,p['point_value'],p['qty']))
+            marked=self.costs.cashflow(p['entry'],mark,p['side'],p['point_value'],p['qty'],entry_fee=p['entry_fee'])[2]
+            quote=min(mark,p['stop']) if direction>0 else max(mark,p['stop'])
+            stopped=self.costs.cashflow(p['entry'],self.costs.exit_price(quote,p['side'],p['tick']),
+                p['side'],p['point_value'],p['qty'],entry_fee=p['entry_fee'])[2]
+            unrealized+=marked;worst+=max(0.,marked-stopped)
         return pnl,unrealized,worst
 
     def block_reason(self,s,now):
@@ -71,8 +72,11 @@ class RiskManager:
         if not last or not 0<=(now-datetime.fromisoformat(last)).total_seconds()<=l.max_data_age_seconds: return 0,"Stale or missing market data"
         if c.spread_ticks>l.max_spread_ticks or c.slippage_ticks>l.max_slippage_ticks: return 0,"Spread or slippage exceeds limit"
         if spec.expiry and local_time(now).date()>=datetime.fromisoformat(spec.expiry).date(): return 0,"Expired contract"
-        entry=d.price if entry is None else entry
+        submission=entry is None
+        entry=d.price if submission else entry
         if not finite(entry) or entry<=0: return 0,"Invalid entry price"
+        try:entry=c.entry_price(entry,d.side,spec.tick) if submission else entry
+        except ValueError:return 0,'Adverse entry price invalid'
         direction=1 if d.side=="BUY" else -1
         if (entry-d.stop)*direction<=0 or (d.target-entry)*direction<=0: return 0,"Stop or target on wrong side of entry"
         pending=[o for k,o in s["orders"].items() if k!=exclude and o["status"] == "NEW"]
@@ -82,12 +86,12 @@ class RiskManager:
         day=local_time(now).date()
         today=sum(local_time(datetime.fromisoformat(o.get("filled_at",o["created_at"]))).date()==day for o in s["orders"].values() if o["status"] in ("FILLED","PARTIAL","CLOSED"))
         if today+len(pending)>=l.max_trades: return 0,"Daily trade count"
-        cash_risk=abs(entry-d.stop)*spec.point_value+c.fee(entry,spec.point_value)+c.fee(d.stop,spec.point_value)+(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value
-        # At submission reserve entry slippage too; at execution entry already contains it.
-        if entry==d.price: cash_risk+=(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value
+        try:
+            cash_risk=c.stop_loss(entry,d.stop,d.side,spec.point_value,spec.tick)
+            net_reward=c.cashflow(entry,c.exit_price(d.target,d.side,spec.tick),d.side,spec.point_value)[2]
+        except ValueError:return 0,'Adverse exit price or costs invalid'
+        if cash_risk<=0:return 0,'Stop must have positive initial cash risk'
         if l.min_net_reward_r:
-            net_reward=abs(d.target-entry)*spec.point_value-c.fee(entry,spec.point_value)-c.fee(d.target,spec.point_value)
-            net_reward-=(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value*(2 if entry==d.price else 1)
             if net_reward/cash_risk<l.min_net_reward_r:return 0,"Net reward/risk below configured minimum after costs"
         pnl,unrealized,worst=self.period_pnl(s,now)
         reserved=sum(o["reserved_risk"] for o in pending)
@@ -97,7 +101,8 @@ class RiskManager:
         used_margin=sum(p["margin"]*p["qty"] for p in positions)+sum(o["margin"]*o["qty"] for o in pending)
         balance=l.capital+sum(t["net"] for t in s["trades"])+unrealized
         qty=min(qty,math.floor(max(0,balance-used_margin)/spec.margin/spec.lot)*spec.lot,l.max_contracts//spec.lot*spec.lot)
-        exposure=sum(abs(s["marks"].get(p["symbol"],p["entry"])*p["qty"]*p["point_value"]) for p in positions)+sum(o["price"]*o["qty"]*o["point_value"] for o in pending)
+        exposure=sum(abs(s["marks"].get(p["symbol"],p["entry"])*p["qty"]*p["point_value"]) for p in positions)+sum(
+            o.get('reserved_exposure',o['price']*o['qty']*o['point_value']) for o in pending)
         qty=min(qty,math.floor(max(0,l.max_exposure-exposure)/(entry*spec.point_value)/spec.lot)*spec.lot)
         if requested is not None:
             if not finite(requested) or requested<spec.lot or requested%spec.lot: return 0,"Invalid lot quantity"

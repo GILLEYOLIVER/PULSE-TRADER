@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Use one actual-fill cash model for risk sizing, pending reservations, remaining stop loss, net target, execution and blind audit. Correct proportional fees on adverse stop exits and reserve the tick-rounded entry; preserve actual losses when an exit gaps beyond the stop.
+- Refresh legacy pending reservations transactionally and add seven risk regressions plus reproducible 10,000-case synthetic accounting stress. Existing frozen market batches and reports are preserved.
+
 - Add an experimental net-risk regression gate alongside the unchanged logistic classifier; preserve untrimmed losses, train-only scaling and exact classifier equivalence. Preregister a maximum of 16 learned validation variants for future batches.
 - Check source availability, retry bounded transient reads, respect rate/permission failures, reserve holdouts only after development is sealed and defer unstarted groups after provider failure. Existing consumed windows remain preserved.
 
