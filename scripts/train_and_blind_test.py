@@ -73,18 +73,21 @@ def train_policy(bars,profile,output,memory,workers,code):
     return policy
 
 
-def get_data(symbol,seconds,start,end,output):
+def get_data(symbol,seconds,start,end,output,*,allow_gaps=False):
     name=f'{symbol}-{seconds}-{start}-{end}'
     cache=output/'data'/name
     cache.mkdir(parents=True,exist_ok=True)
     manifest=cache/'manifest.json'
     if manifest.exists():
         provenance=json.loads(manifest.read_text(encoding='utf-8'))
+        if provenance.get('missing_candles',0) and not allow_gaps:raise ValueError('Cached history has disclosed gaps; explicit permission required')
         bars=CSVProvider(cache/provenance['csv']).bars()
         if history_digest(bars)!=provenance['sha256']:raise ValueError('Dataset cache checksum mismatch')
         return bars
     market=fetch_binance(symbol,seconds,start=datetime.fromisoformat(start).replace(tzinfo=UTC),
-        end=datetime.fromisoformat(end).replace(tzinfo=UTC))
+        end=datetime.fromisoformat(end).replace(tzinfo=UTC),allow_gaps=allow_gaps)
+    if market.provenance['missing_candles']/market.provenance['expected_candles']>.05:
+        raise ValueError('Mais de 5% do intervalo sem candles; janela não qualifica e não será preenchida')
     path=market.save(cache)
     save_report({**market.provenance,'csv':path.name},manifest)
     print(f'Download {symbol} {seconds}s: {len(market.bars)} candles',flush=True)

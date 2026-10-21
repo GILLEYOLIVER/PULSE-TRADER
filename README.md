@@ -18,7 +18,25 @@ preserva automaticamente seu histórico nessa pasta. Não precisa instalar banco
 `python -m scripts.research_goals --plan-only` mostra janelas inéditas; sem `--plan-only`,
 executa duas rodadas limitadas em períodos móveis, com dois processos de CPU por padrão.
 Cada ciclo preserva seus relatórios. A memória pode propor parâmetros do treino anterior;
-os resultados cegos ficam fora dessa seleção. Não há retreino infinito ou agendado.
+os resultados cegos ficam fora dessa seleção.
+
+## Rotina de pesquisa e comparação de versões
+
+A nova rotina está descrita em [Ciclo de pesquisa](docs/CONTINUOUS_RESEARCH.md).
+Ela preserva código e configurações, compara cada ativo/prazo separadamente, avança
+cronologicamente pelos históricos e mantém a referência quando a candidata não passa.
+Há filtros de entrada por médias, direção, volume e afastamento, um candidato de retorno
+à média e testes com custos dobrados. A meta de mais de 90% ainda depende de confirmação;
+nenhuma porcentagem é garantida. A execução continua exclusivamente PAPER.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.research_cycle --plan-only
+.\.venv\Scripts\python.exe -u -m scripts.research_cycle --cycles 1 --workers 2 --candidates 36
+```
+
+O assistente tem uma continuidade a cada duas horas para esta pesquisa. Por regra do
+usuário, ela deve interromper a tarefa quando restarem **40% ou menos da cota semanal
+do Codex**, preservando os resultados. O executável não acessa a conta Codex.
 
 ## Iniciar no Windows
 
