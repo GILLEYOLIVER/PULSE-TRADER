@@ -21,6 +21,11 @@ class Strategy:
     trade_filter: dict | None = None
     trade_score_threshold: float = 0.
 
+    @property
+    def history_limit(self):
+        # 200 complete five-times-longer candles plus partial edge buckets.
+        return 1024 if self.multi_timeframe and self.name in ('sma_cross','mean_reversion') else 1000
+
     def __post_init__(self):
         if self.name not in ("trend","breakout","pullback","adaptive","sma_cross","ema_pullback","mean_reversion"): raise ValueError("Unknown strategy")
         if not math.isfinite(self.reward_r) or not math.isfinite(self.stop_atr) or self.reward_r<=0 or self.stop_atr<=0:
@@ -127,11 +132,23 @@ class Strategy:
         reward=min(distance*self.reward_r,abs(target_mean-b.close))
         if reward<=0:side='WAIT'
         ind.update(rsi2=rsi2,sma200=trend,sma200_slope=trend-prior_trend,target_mean5=target_mean)
+        if self.multi_timeframe and side!='WAIT':
+            higher=aggregate(bars,b.seconds*5)
+            ind['higher_closed_bars']=float(len(higher))
+            if len(higher)<200:side='WAIT'
+            else:
+                values=[row.close for row in higher]
+                fast=mean(values[-50:]);slow=mean(values[-200:])
+                aligned=(fast>slow and values[-1]>slow) if side=='BUY' else (fast<slow and values[-1]<slow)
+                ind.update(higher_sma50=fast,higher_sma200=slow,higher_trend_confirmed=float(aligned),
+                    higher_available_at=(higher[-1].ts+timedelta(seconds=higher[-1].seconds)).timestamp())
+                if not aligned:side='WAIT'
         ts=aware(b.ts)+timedelta(seconds=b.seconds)
         return Decision(b.symbol,side,b.close,b.close-direction*distance,b.close+direction*reward,
             ts,ts+timedelta(seconds=b.seconds*3),self.name,
             f'mean_reversion; RSI2={rsi2:.2f}; SMA200={trend:.4f}; média5={target_mean:.4f}; '
-            f'stop estrutural/ATR limitado a 3 ATR; action={side}',ind)
+            f'stop estrutural/ATR limitado a 3 ATR; '
+            +('confirmação SMA50/200 no prazo 5x; ' if self.multi_timeframe else '')+f'action={side}',ind)
 
     def _moving_average(self,bars):
         simple=self.name=='sma_cross'

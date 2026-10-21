@@ -338,7 +338,7 @@ class PaperEngine:
         for b in bars:
             history=self.history.setdefault(b.symbol,[])
             history.append(b)
-            del history[:-1000]
+            del history[:-self.strategy.history_limit]
             decisions.append(self.strategy.evaluate(history) if evaluate_signal else None)
         self.last_decision=decisions[-1]
         if automatic:
