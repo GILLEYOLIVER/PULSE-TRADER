@@ -15,7 +15,7 @@ As regras de médias, tendência e volume produzem muitas entradas perdedoras de
 ## Seleção antes do teste externo
 
 1. A grade técnica é avaliada em três blocos cronológicos comuns. O contexto anterior inicialmente continha 250 candles; a próxima [iteração multitemporal](MULTI_TIMEFRAME_PROTOCOL.md) passa a usar até 1.024 no desenvolvimento e exigir 1.024 antes do teste externo, sem sinais ou ordens durante o aquecimento. Rodadas anteriores não são modificadas.
-2. No máximo duas bases técnicas com amostra entram no experimento de filtro. Sua escolha usa somente os blocos de desenvolvimento.
+2. No máximo duas bases técnicas com amostra entram no experimento de filtro. Sua escolha usa somente o desenvolvimento. Na [iteração de histórico ampliado](LONG_HISTORY_PROTOCOL.md), até seis bases do ranking técnico têm o prefixo anterior ao primeiro bloco verificado; as primeiras duas com amostra suficiente seguem para os quatro limiares. Não há seleção por resultados externos ou relaxamento das contagens.
 3. Para cada bloco, o modelo é ajustado novamente com operações encerradas **antes** daquele bloco. Normalização, pesos e amostra vêm somente desse passado.
 4. São estudados os limiares fixos 0,55/0,65/0,80/0,90 da pontuação interna. Esses números não são probabilidades calibradas nem porcentagens esperadas de acerto.
 5. Uma candidata precisa dos mesmos critérios de quantidade de operações, lucro, perdas e consistência das regras técnicas. Modelos que apenas deixam de operar não ganham acerto de 100%.

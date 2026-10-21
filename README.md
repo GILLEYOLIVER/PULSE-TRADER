@@ -36,6 +36,8 @@ usa resultados líquidos anteriores para filtrar entradas. Ele tem cortes tempor
 amostra mínima e validação posterior; sua pontuação interna não é probabilidade de acerto.
 O próximo [experimento multitemporal](docs/MULTI_TIMEFRAME_PROTOCOL.md) compara as entradas
 com confirmação das médias em um prazo maior, usando somente candles encerrados.
+O [desenvolvimento com histórico ampliado](docs/LONG_HISTORY_PROTOCOL.md) verifica a amostra
+do professor antes do ajuste e preserva downloads grandes em partes conferidas por hash.
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.research_cycle --plan-only
