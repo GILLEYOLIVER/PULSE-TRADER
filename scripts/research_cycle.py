@@ -206,13 +206,18 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         store.set_champion(state,group,reference_id,'INITIAL_REFERENCE');store.save(state)
     count=previous.get('cycles',0)
     development_after=(parameters.get('trade_filter') or {}).get('training_cutoff')
-    bank=candidate_bank(count,parameters,args.candidates,allow_multi_timeframe=seconds in (300,3600))
+    priorities=previous.get('next_development_experiments',[])
+    bank=candidate_bank(count,parameters,args.candidates,allow_multi_timeframe=seconds in (300,3600),
+        development_priorities=priorities)
     plan={'cycle_id':cycle_id,'group':group,'windows':window,'code_id':code_id,
         'external_reservation':'after sealed policy, before the first external request',
         'reference_id':reference_id,'reference_code_id':original_reference['code_id'],
         'reference_execution':'original archived source and original assumptions',
         'development_reference':'current-code port used only as a development seed',
         'comparison_contract':contract,'candidate_parameters':bank,
+        'experiment_priorities':{'source':'previous selected development only; never external outcomes',
+            'hypotheses':priorities,'maximum_total_candidates':args.candidates,
+            'provenance':previous.get('development_error_review_provenance')},
         'assumptions':settings,'selection':'three chronological development folds; >=30 total trades, >=5 trades and positive aggregate net in each fold; Wilson lower bound first',
         'goal':'same version; >=3 distinct real windows; >=100 trades total; >90% each; positive net and double-cost stress',
         'promotion':'preselected challenger only; >=10 external trades; better net and nonworse accuracy than reference; positive double-cost net; drawdown <=10%',
@@ -267,6 +272,10 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     # Immutable choice before the holdout is fetched. Both retained and rejected configurations are saved.
     atomic_json(group_dir/'frozen-policy.json',policy)
     atomic_json(group_dir/'development-matrix.json',results)
+    atomic_json(group_dir/'error-review-development.json',{
+        'source':'DEVELOPMENT_ONLY','candidate_id':candidate_id,'selected_review':winner.get('error_review'),
+        'next_experiment_priorities':winner.get('error_review',{}).get('next_experiment_priorities',[]),
+        'external_outcomes_used':False,'automatic_promotion':False})
     memory.append_batch('VALIDATION',[{'profile':group,'cycle_id':cycle_id,**row} for row in results])
     memory.append('SEALED_POLICY',{'profile':group,'cycle_id':cycle_id,'winner':{'parameters':selected_parameters,
         'risk_profile':'fixed_conservative'},'policy_sha256':policy['sha256'],'candidate_id':candidate_id})
@@ -313,6 +322,10 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     if promotion['promoted']:store.set_champion(state,group,candidate_id,'VALIDATION_AND_EXTERNAL_GATE_PASSED')
     state['evaluations'].extend(confirmations)
     state['groups'][group]['cycles']=count+1
+    state['groups'][group]['next_development_experiments']=winner.get('error_review',{}).get('next_experiment_priorities',[])
+    state['groups'][group]['development_error_review_provenance']={'cycle_id':cycle_id,'candidate_id':candidate_id,
+        'development_sha256':history_digest(training),'cutoff':window['test_start'],
+        'review_sha256':digest(winner.get('error_review',{}))}
     state['groups'][group]['last_evidence']=evidence
     store.save(state)
     memory.append_batch('BLIND_TEST',[{'profile':group,'cycle_id':cycle_id,**row,'promotion':promotion} for row in confirmations])
