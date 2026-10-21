@@ -3,6 +3,8 @@
 A hipótese posterior de [contexto de médias móveis](MA_CONTEXT_PROTOCOL.md) versiona as
 características das próximas fontes: 26 medidas, mantendo intactos os modelos anteriores de 18.
 Ela preserva os mesmos critérios financeiros e não modifica avaliações já abertas.
+O ensaio conhecido não sustentou a substituição: o padrão continua em 18, com 26 disponível
+somente para experimentos explicitamente declarados antes de novos dados.
 
 ## Hipótese
 

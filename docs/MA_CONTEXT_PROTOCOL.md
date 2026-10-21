@@ -47,7 +47,7 @@ ou alterar características/limiares depois de ver esses resultados para repetir
 Preservar todos os resultados e conferir a equivalência do caminho antigo com a matriz arquivada.
 Uma falha mecânica pode ser corrigida e identificada; uma perda financeira não é uma falha mecânica.
 
-Nos lotes posteriores, o esquema novo ocupa o mesmo máximo de **24 variantes aprendidas**:
+Em um lote declarado com o esquema novo, ele ocupa o mesmo máximo de **24 variantes aprendidas**:
 duas bases, três modelos e quatro cortes. Não duplicar o orçamento de busca adicionando também
 24 variantes antigas. Referências antigas continuam executadas no seu próprio código arquivado.
 Somente uma candidata é escolhida pelo desenvolvimento e congelada antes do externo.
@@ -67,3 +67,29 @@ observações adjacentes também nos prefixos curtos, com teste de séries cresc
 O ensaio substituto `20261021T103626` mantém a mesma base, dados, cortes, características e gates.
 Esses identificadores de pastas não determinam a cronologia: os registros de execução preservam
 os horários efetivos, inclusive o nome manual da primeira pasta.
+
+## Resultado conhecido e decisão de continuidade
+
+A comparação `20261021T103626` terminou sem candidatas elegíveis em ambos os esquemas.
+Todos os 12 resultados financeiros antigos e nove modelos numéricos foram exatamente iguais
+aos arquivos da comparação anterior. Os professores dos dois esquemas tiveram as mesmas
+operações, rótulos e valores de risco; as primeiras 18 características também ficaram idênticas.
+
+| Modelo / corte | Anterior: vitórias/operações; líquido USDT | Contexto novo |
+| --- | --- | --- |
+| Classificador 0,55 | 147/230; -2.731,67 | 146/229; -2.761,62 |
+| Classificador 0,65 | 104/146; -296,11 | 111/157; -517,33 |
+| Caixa/orçamento 0,55 | 58/86; -434,95 | 55/83; -639,78 |
+| Caixa/orçamento 0,65 | 57/83; -301,20 | 54/80; -488,71 |
+| Caixa/risco inicial 0,55 e 0,65 | 38/54; -28,25 | 34/51; -221,87 |
+| Os três modelos em 0,80 | 4/5; -3,43 | 3/4; -49,57 |
+| Os três modelos em 0,90 | Sem operações | Sem operações |
+
+O contexto novo não demonstrou melhoria nesse conjunto. Não houve promoção nem adoção na
+interface. O padrão dos próximos lotes permanece `trade_context_v1` com 18 características;
+o contexto novo permanece preservado como hipótese optativa via
+`--trade-feature-set trade_ma_regime_v2`, sempre declarada para o lote inteiro antes dos dados.
+Não escolher entre ambos depois do externo nem executar duas seleções externas na mesma janela.
+Esse resultado não torna o filtro antigo lucrativo ou validado para negociação real.
+Os modelos e relatórios completos ficam no diretório do ensaio; os dados conhecidos não contam
+como nova evidência da meta. As características e os critérios do ensaio encerrado não foram alterados.

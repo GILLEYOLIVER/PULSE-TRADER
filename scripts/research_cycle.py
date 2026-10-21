@@ -24,7 +24,7 @@ from trading_assistant.v2.research_history import get_research_history,check_res
 from trading_assistant.v2.market_data import DataUnavailable,TransientDataUnavailable,ProviderBackoffRequired
 from trading_assistant.v2.suggestions import history_digest
 from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model,
-    training_sample_health,classification_only_model,initial_risk_model,LEGACY_TRADE_SET,MA_TRADE_SET,MA_TRADE_FEATURES)
+    training_sample_health,classification_only_model,initial_risk_model,LEGACY_TRADE_SET,MA_TRADE_SET,trade_feature_names)
 
 
 METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
@@ -189,6 +189,7 @@ def write_report(output,summary):
 
 def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     symbol,seconds_text=group.split(':');seconds=int(seconds_text)
+    feature_set=getattr(args,'trade_feature_set',LEGACY_TRADE_SET)
     train_days,test_days=window_sizes(symbol,seconds)
     try:
         window=plan_forward(rotation,symbol,seconds,as_of=datetime.now(UTC),test_days=test_days,
@@ -222,7 +223,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'mean_reversion_confirmation':'higher SMA50/200 alignment and close on same side of SMA200',
         'daily_grid':'unchanged; insufficient prefix for 200 higher candles in early folds'}
     plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
-        'feature_set':MA_TRADE_SET,'features':list(MA_TRADE_FEATURES),
+        'feature_set':feature_set,'features':list(trade_feature_names(feature_set)),
         'missing_ma_context':'zero for unavailable averages/slopes; explicit 205-observation availability feature',
         'model_variants':['trade_outcome_logistic','trade_outcome_logistic_net','trade_outcome_logistic_initial_risk'],
         'maximum_validated_variants':24,'net_gate':'positive net / budget or actual initial stop cash; training data only',
@@ -246,12 +247,12 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         ranked=sorted((row for row in results if row['parameters'].get('trade_filter') is None and row['aggregate']['trades']>=30),
             key=lambda row:tuple(row['selection_key']),reverse=True)[:6]
         prefix_tasks=[(training,row['parameters'],development_after,
-            group_dir/'teacher-prefixes'/digest(base_parameters(row['parameters'])),MA_TRADE_SET) for row in ranked]
+            group_dir/'teacher-prefixes'/digest(base_parameters(row['parameters'])),feature_set) for row in ranked]
         preflight=list(pool.map(teacher_prefix_task,prefix_tasks))
         atomic_json(group_dir/'teacher-prefix-eligibility.json',[{k:v for k,v in row.items() if k!='teacher_data'} for row in preflight])
         seeds=[row for row in preflight if row['eligible']][:2]
         tasks=[(training,row['parameters'],development_after,group_dir/'trade-models'/digest(base_parameters(row['parameters'])),
-            row['teacher_data'],MA_TRADE_SET) for row in seeds]
+            row['teacher_data'],feature_set) for row in seeds]
         for index,learned in enumerate(pool.map(learned_development_task,tasks),1):
             results.extend(learned)
             print(f'{group}: learned base {index}/{len(seeds)}; eligible thresholds={sum(row["eligible"] for row in learned)}',flush=True)
@@ -324,6 +325,8 @@ def main():
     parser.add_argument('--cycles',type=int,choices=range(1,21),default=1)
     parser.add_argument('--workers',type=int,choices=(1,2,3,4),default=2)
     parser.add_argument('--candidates',type=int,choices=range(12,211),default=36)
+    parser.add_argument('--trade-feature-set',choices=(LEGACY_TRADE_SET,MA_TRADE_SET),default=LEGACY_TRADE_SET,
+        help='Freeze one feature schema for the entire batch; legacy remains the default after the known MA regression')
     parser.add_argument('--groups',nargs='+',choices=GROUPS,default=list(GROUPS))
     parser.add_argument('--memory',default='runtime/aprendizado')
     parser.add_argument('--output',default='reports/research-cycles')
@@ -367,7 +370,7 @@ def main():
             summary={'cycle_id':cycle_id,'code_id':code_id,'groups':[],'goal_reached':False,'mode':'PAPER','status':'IN_PROGRESS'}
             atomic_json(output/'batch-before-results.json',{'groups':args.groups,'technical_candidates_per_group':args.candidates,
                 'maximum_trade_filter_candidates_per_group':24,
-                'trade_feature_set':MA_TRADE_SET,'trade_feature_count':len(MA_TRADE_FEATURES),
+                'trade_feature_set':args.trade_feature_set,'trade_feature_count':len(trade_feature_names(args.trade_feature_set)),
                 'maximum_teacher_prefix_preflights_per_group':6,
                 'workers':args.workers,'code_id':code_id,'started_at':cycle_id})
             provider_deferred=False
