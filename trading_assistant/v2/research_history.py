@@ -4,18 +4,46 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import time
 from datetime import datetime,timedelta
 from pathlib import Path
 
 from .data import CSVProvider
 from .learning import digest
-from .market_data import fetch_binance
+from .market_data import fetch_binance,json_response,TransientDataUnavailable,DataUnavailable,ProviderBackoffRequired
 from .models import UTC,aware
 from .research import atomic_json
 from .suggestions import history_digest,validate_series
 
 MAX_RESEARCH_BARS=100000
 MIN_FREE_BYTES=256*1024**2
+
+
+def research_json_response(url):
+    """Retry the same read only for transient errors; never bypass HTTP bans."""
+    for attempt in range(3):
+        try:return json_response(url)
+        except TransientDataUnavailable:
+            if attempt==2:raise
+            time.sleep(attempt+1)
+
+
+def record_provider_backoff(directory,error):
+    if isinstance(error,ProviderBackoffRequired) and not error.from_saved_backoff:
+        save_checked(Path(directory)/'provider-backoff.json',{'until_epoch':error.retry_not_before_epoch,
+            'retry_after_seconds':error.retry_after_seconds,'reason':str(error)})
+
+
+def check_research_source(directory=None):
+    path=Path(directory)/'provider-backoff.json' if directory is not None else None
+    if path is not None and path.exists():
+        record,_=checked_json(path)
+        if record['until_epoch']>time.time():
+            error=ProviderBackoffRequired('A fonte pediu espera; o próximo pedido ainda não está liberado.')
+            error.retry_not_before_epoch=record['until_epoch'];error.from_saved_backoff=True
+            raise error
+    if research_json_response('https://data-api.binance.vision/api/v3/ping')!={}:
+        raise DataUnavailable('Resposta incompatível no diagnóstico da fonte de pesquisa')
 
 
 def checked_json(path):
@@ -85,7 +113,8 @@ def get_research_history(symbol,seconds,start,end,output,*,fetcher=None,chunk_ba
             if previous is not None:raise ValueError('Completed research history is missing a preserved chunk')
             if shutil.disk_usage(root).free<MIN_FREE_BYTES+expected*512:
                 raise ValueError('Insufficient free space; saved research chunks were preserved')
-            market=(fetcher or fetch_binance)(symbol,seconds,start=cursor,end=until,allow_gaps=True)
+            market=(fetcher(symbol,seconds,start=cursor,end=until,allow_gaps=True) if fetcher is not None else
+                fetch_binance(symbol,seconds,start=cursor,end=until,allow_gaps=True,getter=research_json_response))
             bars,provenance=market.bars,market.provenance
             validate_part(bars,provenance,part_request)
             path=market.save(directory)

@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import json
+import time
 import os
 import re
 import unicodedata
@@ -25,6 +26,18 @@ class DataUnavailable(ValueError):
     pass
 
 
+class TransientDataUnavailable(DataUnavailable):
+    pass
+
+
+class ProviderBackoffRequired(DataUnavailable):
+    def __init__(self,message,retry_after_seconds=300):
+        super().__init__(message)
+        self.retry_after_seconds=max(1,min(int(retry_after_seconds),604800))
+        self.retry_not_before_epoch=time.time()+self.retry_after_seconds
+        self.from_saved_backoff=False
+
+
 def http_bytes(url, *, token=None, limit=32_000_000):
     headers = {'User-Agent': 'PULSE-TRADER/2.1 read-only analysis', 'Accept': 'application/json,text/csv,application/zip'}
     if token:
@@ -33,9 +46,15 @@ def http_bytes(url, *, token=None, limit=32_000_000):
         with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as response:
             raw = response.read(limit + 1)
     except urllib.error.HTTPError as error:
+        if error.code in (418,429):
+            try:delay=int(error.headers.get('Retry-After',300)) if error.headers else 300
+            except (TypeError,ValueError):delay=300
+            raise ProviderBackoffRequired(f'Provedor respondeu HTTP {error.code}; aguarde a liberação antes de outro lote.',delay) from None
+        if error.code in (500,502,503,504):
+            raise TransientDataUnavailable(f'Provedor temporariamente indisponível (HTTP {error.code}).') from None
         raise DataUnavailable(f'Provedor respondeu HTTP {error.code}; confira disponibilidade, plano e permissões da fonte.') from None
     except (urllib.error.URLError, TimeoutError, OSError):
-        raise DataUnavailable('Não foi possível consultar a fonte de dados. Tente novamente; os dados salvos foram preservados.') from None
+        raise TransientDataUnavailable('Não foi possível consultar a fonte de dados. Tente novamente; os dados salvos foram preservados.') from None
     if len(raw) > limit:
         raise DataUnavailable('Resposta do provedor acima do limite permitido')
     return raw

@@ -9,7 +9,12 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-151 tests passed without skips. Larger-history coverage verifies chunk boundaries, interrupted-download
+166 tests passed without skips. Net-score coverage verifies unchanged classifier results, correct per-variant
+model-checksum provenance, unfavorable
+cash despite high win frequency, untrimmed negative tails, zero-score numeric tolerance, integrity and
+pre-external model materialization. Provider-recovery coverage verifies bounded same-URL retries,
+persisted Retry-After deadlines, deferred unstarted groups, no reservation after a failed training download
+and continued exclusion after a failed external request. Larger-history coverage verifies chunk boundaries, interrupted-download
 recovery, corruption rejection without silent replacement, whole-window gap counts, future/size/disk guards
 and unchanged normal-provider limits. Teacher-prefix coverage verifies pre-validation-only inputs,
 minimum sample/class counts, identical cached model fitting and rejection of mismatched data or parameters.

@@ -38,6 +38,9 @@ O próximo [experimento multitemporal](docs/MULTI_TIMEFRAME_PROTOCOL.md) compara
 com confirmação das médias em um prazo maior, usando somente candles encerrados.
 O [desenvolvimento com histórico ampliado](docs/LONG_HISTORY_PROTOCOL.md) verifica a amostra
 do professor antes do ajuste e preserva downloads grandes em partes conferidas por hash.
+O [filtro de pontuação líquida](docs/NET_SCORE_PROTOCOL.md) é uma candidata adicional para
+estudar acerto e tamanho dos resultados em conjunto. A [recuperação da fonte](docs/PROVIDER_RECOVERY.md)
+preserva os dados e adia grupos diante de indisponibilidade, sem reabrir avaliações consumidas.
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.research_cycle --plan-only
