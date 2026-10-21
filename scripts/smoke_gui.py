@@ -6,9 +6,32 @@ from unittest.mock import patch
 from pathlib import Path
 from trading_assistant.v2.dashboard import Dashboard
 from trading_assistant.v2.data import export_csv
+from tkinter import ttk
+
+def assert_readable(root,foreground,background):
+    def luminance(color):
+        rgb=[v/65535 for v in root.winfo_rgb(color)]
+        linear=[v/12.92 if v<=.04045 else ((v+.055)/1.055)**2.4 for v in rgb]
+        return sum(v*w for v,w in zip(linear,(.2126,.7152,.0722)))
+    lo,hi=sorted((luminance(foreground),luminance(background)))
+    assert (hi+.05)/(lo+.05)>=4.5,(foreground,background)
+
 with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
     d=Dashboard(tmp)
     d.root.withdraw()
+    for dark in (True,False,True):
+        d.dark=dark;d._theme();style=ttk.Style(d.root)
+        for name,fg,bg,states in (
+                ('TEntry','foreground','fieldbackground',((),('disabled',),('readonly',))),
+                ('TCombobox','foreground','fieldbackground',((),('readonly',),('disabled',))),
+                ('TEntry','selectforeground','selectbackground',((),)),
+                ('Badge.TLabel','foreground','background',((),)),
+                ('Accent.TButton','foreground','background',((),('active',),('pressed',))),
+                ('Treeview','foreground','background',(('selected',),))):
+            for state in states:
+                foreground=style.lookup(name,fg,state);background=style.lookup(name,bg,state)
+                assert foreground and background,(name,state,'Missing field colors')
+                assert_readable(d.root,foreground,background)
     d.quick_vars['capital'].set('12000')
     d.quick_vars['risk_percent'].set('0,4')
     d.quick_vars['strategy'].set('breakout')
@@ -75,5 +98,5 @@ with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
         x,y=d.root.winfo_rootx(),d.root.winfo_rooty()
         image=ImageGrab.grab(bbox=(x,y,x+d.root.winfo_width(),y+d.root.winfo_height()))
         Path(screenshot).parent.mkdir(parents=True,exist_ok=True);image.save(screenshot)
-    print('GUI_OK: risk form, calendar, UI backtest, suggestions intraday/swing, saved plan, multi-CSV catalog, replay cutoff, export, chart, theme, emergency')
+    print('GUI_OK: readable inputs/selections/buttons in both themes, risk form, calendar, UI backtest, suggestions intraday/swing, saved plan, multi-CSV catalog, replay cutoff, export, chart, theme, emergency')
     d.close()
