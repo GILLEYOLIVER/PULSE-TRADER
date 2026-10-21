@@ -6,7 +6,8 @@ Execução financeira exclusivamente PAPER. Pasta do projeto: `C:\Users\A1\Docum
 
 O PR #2 foi revisado, testado e integrado por solicitação explícita do usuário.
 O commit de integração é `f09ee7c3be4e1fbfbfac7fdba59f92500b9871b3`.
-Esta continuação acrescenta os passos abaixo e segue pela revisão da nova entrega antes de integrar.
+Esta continuação acrescenta os passos abaixo no [PR #3](https://github.com/GILLEYOLIVER/PULSE-TRADER/pull/3),
+com testes do código, da interface e do executável antes da integração solicitada.
 
 ## 2. Dados públicos e Profit
 
@@ -101,3 +102,18 @@ restaurada sem comandos. Restaurar um backup antigo também restaura o relógio/
 e produz um ZIP portátil. O empacotamento inclui Python, Tk, SQLite, interface e timezone.
 Versões com `runtime` existente não são apagadas ao reconstruir. Não há instalação de serviços,
 aceite de licenças pagas, corretora real, assinatura de código ou homologação em outro computador.
+
+### Pacote verificado nesta entrega
+
+- Código empacotado: `b2d18cc01509da47fb84b7527fd57a9e5e7bf0fa`.
+- Executável: `dist/b2d18cc/PulseTrader/PulseTrader.exe`.
+- ZIP portátil: `dist/b2d18cc/PulseTrader-Windows-Portable.zip` (22.374.695 bytes).
+- Teste do executável compilado: `reports/portable-smoke.json`, `ok=true`, `frozen=true`, modo PAPER.
+- Verificações: replay de 80 candles, sugestões, formulários, carregar replay, armar/cancelar plano,
+  backup/restauração, tarefas em segundo plano e SQLite incluído.
+- Código: 78 testes aprovados, compilação de módulos e teste de interface aprovados.
+
+Abra `iniciar-portatil.cmd` para usar o pacote com os dados atuais em `runtime` do projeto.
+Para levar a outro computador, extraia o ZIP e mantenha a pasta inteira do programa;
+o executável criará seu próprio `runtime` ao lado dele. O ZIP não contém os dados pessoais
+do projeto. Use o recurso de backup/restauração para transferi-los quando necessário.
