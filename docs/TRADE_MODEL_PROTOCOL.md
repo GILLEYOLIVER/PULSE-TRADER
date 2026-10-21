@@ -1,5 +1,9 @@
 # Filtro de entradas por resultados líquidos
 
+A hipótese posterior de [contexto de médias móveis](MA_CONTEXT_PROTOCOL.md) versiona as
+características das próximas fontes: 26 medidas, mantendo intactos os modelos anteriores de 18.
+Ela preserva os mesmos critérios financeiros e não modifica avaliações já abertas.
+
 ## Hipótese
 
 As regras de médias, tendência e volume produzem muitas entradas perdedoras depois dos custos. O experimento testa um algoritmo estatístico regularizado que aprende quais contextos das propostas anteriores terminaram com lucro líquido. Ele não usa IA generativa e não promete mais de 90% de acerto.

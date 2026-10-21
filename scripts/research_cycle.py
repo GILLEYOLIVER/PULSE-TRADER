@@ -24,7 +24,7 @@ from trading_assistant.v2.research_history import get_research_history,check_res
 from trading_assistant.v2.market_data import DataUnavailable,TransientDataUnavailable,ProviderBackoffRequired
 from trading_assistant.v2.suggestions import history_digest
 from trading_assistant.v2.trade_learning import (InsufficientTradeData,base_parameters,collect_trade_samples,fit_trade_model,
-    training_sample_health,classification_only_model,initial_risk_model)
+    training_sample_health,classification_only_model,initial_risk_model,LEGACY_TRADE_SET,MA_TRADE_SET,MA_TRADE_FEATURES)
 
 
 METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','mean_reversion')
@@ -60,33 +60,39 @@ def development_task(task):
 
 
 def teacher_prefix_task(task):
-    bars,parameters,after,directory=task;folds=development_slices(bars,after)
+    bars,parameters,after,directory,*options=task;folds=development_slices(bars,after)
+    feature_set=options[0] if options else LEGACY_TRADE_SET
+    schema={} if feature_set==LEGACY_TRADE_SET else {'feature_set':feature_set}
     if not folds:return {'parameters':parameters,'eligible':False,'reason':'no_compatible_temporal_folds'}
     lo=folds[0][0];past=bars[:lo];limits,costs,specs=research_assumptions(bars[0].symbol)
-    samples,diagnostics=collect_trade_samples(past,Strategy(**base_parameters(parameters)),limits,costs,specs)
+    samples,diagnostics=collect_trade_samples(past,Strategy(**base_parameters(parameters)),limits,costs,specs,feature_set=feature_set)
     health=training_sample_health(samples);path=Path(directory)/'prefix-labels.json'
-    atomic_json(path,{'samples':samples,'teacher':diagnostics,'cutoff':bars[lo].ts.isoformat(),
+    atomic_json(path,{**schema,'samples':samples,'teacher':diagnostics,'cutoff':bars[lo].ts.isoformat(),
         'dataset_sha256':history_digest(past),'sample_health':health})
-    return {'parameters':parameters,'eligible':health['eligible'],'sample_health':health,
+    return {**schema,'parameters':parameters,'eligible':health['eligible'],'sample_health':health,
         'prefix_cutoff':bars[lo].ts.isoformat(),'path':str(path),
-        'teacher_data':{'samples':samples,'diagnostics':diagnostics,'dataset_sha256':history_digest(past),
+        'teacher_data':{**schema,'samples':samples,'diagnostics':diagnostics,'dataset_sha256':history_digest(past),
             'parameters':asdict(Strategy(**base_parameters(parameters))),'cutoff':bars[lo].ts.isoformat()}}
 
 
-def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_net_head=False,with_initial_risk=False):
+def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_net_head=False,with_initial_risk=False,
+    feature_set=LEGACY_TRADE_SET):
     if with_initial_risk and not with_net_head:raise ValueError('Initial-risk target requires the net head')
     base=base_parameters(parameters);strategy=Strategy(**base)
     limits,costs,specs=research_assumptions(bars[0].symbol)
-    if teacher_data is None:samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs)
+    if teacher_data is None:samples,diagnostics=collect_trade_samples(bars,strategy,limits,costs,specs,feature_set=feature_set)
     else:
         if (teacher_data['dataset_sha256']!=history_digest(bars) or teacher_data['parameters']!=asdict(strategy)
             or teacher_data['cutoff']!=cutoff.isoformat()):raise ValueError('Teacher prefix belongs to another dataset, policy or cutoff')
+        if teacher_data.get('feature_set',LEGACY_TRADE_SET)!=feature_set:
+            raise ValueError('Teacher prefix belongs to another feature schema')
         samples,diagnostics=teacher_data['samples'],teacher_data['diagnostics']
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
-    atomic_json(directory/'labels.json',{'samples':samples,'teacher':diagnostics,'cutoff':cutoff.isoformat()})
+    schema={} if feature_set==LEGACY_TRADE_SET else {'feature_set':feature_set}
+    atomic_json(directory/'labels.json',{**schema,'samples':samples,'teacher':diagnostics,'cutoff':cutoff.isoformat()})
     model=fit_trade_model(samples,parameters=asdict(strategy),symbol=bars[0].symbol,seconds=bars[0].seconds,
         source=bars[0].source,cutoff=cutoff,costs=costs,instrument=specs[bars[0].symbol],dataset_sha256=history_digest(bars),
-        with_net_head=with_net_head,risk_budget=limits.capital*limits.risk_fraction if with_net_head else None)
+        with_net_head=with_net_head,risk_budget=limits.capital*limits.risk_fraction if with_net_head else None,feature_set=feature_set)
     if with_initial_risk:model=initial_risk_model(model,samples)
     atomic_json(directory/'model.json',model)
     return model,diagnostics
@@ -94,6 +100,11 @@ def fit_entry_filter(bars,parameters,directory,cutoff,*,teacher_data=None,with_n
 
 def learned_development_task(task):
     bars,parameters,after,directory,*preflight=task;thresholds=(.55,.65,.8,.9)
+    feature_set=preflight[1] if len(preflight)>1 else LEGACY_TRADE_SET
+    def learning(kind,threshold):
+        value={'threshold':threshold,'kind':kind}
+        if feature_set!=LEGACY_TRADE_SET:value['feature_set']=feature_set
+        return value
     kinds=('trade_outcome_logistic','trade_outcome_logistic_net','trade_outcome_logistic_initial_risk')
     reports={(kind,threshold):[] for kind in kinds for threshold in thresholds};training=[]
     def training_for(kind):
@@ -101,11 +112,11 @@ def learned_development_task(task):
     base=base_parameters(parameters);limits,costs,specs=research_assumptions(bars[0].symbol)
     for index,(lo,hi) in enumerate(development_slices(bars,after),1):
         try:model,diagnostics=fit_entry_filter(bars[:lo],base,Path(directory)/f'fold-{index}',bars[lo].ts,
-            teacher_data=preflight[0] if index==1 and preflight else None,with_net_head=True)
+            teacher_data=preflight[0] if index==1 and preflight else None,with_net_head=True,feature_set=feature_set)
         except InsufficientTradeData as error:
             result=[]
             for kind,threshold in reports:
-                row=development_result(base,[]);row.update(learning={'threshold':threshold,'kind':kind},
+                row=development_result(base,[]);row.update(learning=learning(kind,threshold),
                     training_status='INSUFFICIENT_RESOLVED_TRADES',detail=str(error),training=training_for(kind))
                 result.append(row)
             return result
@@ -125,7 +136,7 @@ def learned_development_task(task):
             reports[kind,threshold].append(report)
     result=[]
     for kind,threshold in reports:
-        row=development_result(base,reports[kind,threshold]);row.update(learning={'threshold':threshold,'kind':kind},
+        row=development_result(base,reports[kind,threshold]);row.update(learning=learning(kind,threshold),
             training_status='TEMPORAL_FOLDS_EVALUATED',training=training_for(kind))
         result.append(row)
     return result
@@ -135,7 +146,8 @@ def materialize_candidate(winner,training,directory,cutoff):
     if not winner.get('learning'):return asdict(Strategy(**winner['parameters']))
     model,_=fit_entry_filter(training,winner['parameters'],Path(directory)/'trade-models'/'final',cutoff,
         with_net_head=winner['learning'].get('kind') in ('trade_outcome_logistic_net','trade_outcome_logistic_initial_risk'),
-        with_initial_risk=winner['learning'].get('kind')=='trade_outcome_logistic_initial_risk')
+        with_initial_risk=winner['learning'].get('kind')=='trade_outcome_logistic_initial_risk',
+        feature_set=winner['learning'].get('feature_set',LEGACY_TRADE_SET))
     return asdict(Strategy(**base_parameters(winner['parameters']),trade_filter=model,
         trade_score_threshold=winner['learning']['threshold']))
 
@@ -210,6 +222,8 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         'mean_reversion_confirmation':'higher SMA50/200 alignment and close on same side of SMA200',
         'daily_grid':'unchanged; insufficient prefix for 200 higher candles in early folds'}
     plan['learned_entry_filter']={'bases':2,'thresholds':[.55,.65,.8,.9],
+        'feature_set':MA_TRADE_SET,'features':list(MA_TRADE_FEATURES),
+        'missing_ma_context':'zero for unavailable averages/slopes; explicit 205-observation availability feature',
         'model_variants':['trade_outcome_logistic','trade_outcome_logistic_net','trade_outcome_logistic_initial_risk'],
         'maximum_validated_variants':24,'net_gate':'positive net / budget or actual initial stop cash; training data only',
         'teacher_prefix_preflight':{'maximum_ranked_bases':6,'selected_eligible_bases':2,
@@ -232,12 +246,12 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
         ranked=sorted((row for row in results if row['parameters'].get('trade_filter') is None and row['aggregate']['trades']>=30),
             key=lambda row:tuple(row['selection_key']),reverse=True)[:6]
         prefix_tasks=[(training,row['parameters'],development_after,
-            group_dir/'teacher-prefixes'/digest(base_parameters(row['parameters']))) for row in ranked]
+            group_dir/'teacher-prefixes'/digest(base_parameters(row['parameters'])),MA_TRADE_SET) for row in ranked]
         preflight=list(pool.map(teacher_prefix_task,prefix_tasks))
         atomic_json(group_dir/'teacher-prefix-eligibility.json',[{k:v for k,v in row.items() if k!='teacher_data'} for row in preflight])
         seeds=[row for row in preflight if row['eligible']][:2]
         tasks=[(training,row['parameters'],development_after,group_dir/'trade-models'/digest(base_parameters(row['parameters'])),
-            row['teacher_data']) for row in seeds]
+            row['teacher_data'],MA_TRADE_SET) for row in seeds]
         for index,learned in enumerate(pool.map(learned_development_task,tasks),1):
             results.extend(learned)
             print(f'{group}: learned base {index}/{len(seeds)}; eligible thresholds={sum(row["eligible"] for row in learned)}',flush=True)
@@ -353,6 +367,7 @@ def main():
             summary={'cycle_id':cycle_id,'code_id':code_id,'groups':[],'goal_reached':False,'mode':'PAPER','status':'IN_PROGRESS'}
             atomic_json(output/'batch-before-results.json',{'groups':args.groups,'technical_candidates_per_group':args.candidates,
                 'maximum_trade_filter_candidates_per_group':24,
+                'trade_feature_set':MA_TRADE_SET,'trade_feature_count':len(MA_TRADE_FEATURES),
                 'maximum_teacher_prefix_preflights_per_group':6,
                 'workers':args.workers,'code_id':code_id,'started_at':cycle_id})
             provider_deferred=False

@@ -13,6 +13,11 @@ from .models import aware
 
 
 TRADE_FEATURES=(*ENRICHED,'gross_reward_r','stop_distance_atr','estimated_cost_stop_ratio','side')
+LEGACY_TRADE_SET='trade_context_v1'
+MA_TRADE_SET='trade_ma_regime_v2'
+MA_TRADE_FEATURES=(*TRADE_FEATURES,'side_distance_sma50_atr','side_distance_sma200_atr',
+    'side_sma50_slope5_atr','side_sma200_slope5_atr','rsi2_scaled','atr_price_ratio',
+    'ma205_available','long_slope_pullback_interaction')
 LOGISTIC='trade_outcome_logistic_l2'
 LOGISTIC_NET='trade_outcome_logistic_l2_net_gate'
 LOGISTIC_INITIAL_RISK='trade_outcome_logistic_l2_initial_risk_gate'
@@ -27,14 +32,47 @@ def base_parameters(parameters):
     return {k:v for k,v in parameters.items() if k not in ('trade_filter','trade_score_threshold')}
 
 
-def trade_features(decision,bars,costs,instrument):
+def trade_feature_names(feature_set):
+    if feature_set==LEGACY_TRADE_SET:return TRADE_FEATURES
+    if feature_set==MA_TRADE_SET:return MA_TRADE_FEATURES
+    raise ValueError('Unsupported trade feature schema')
+
+
+def model_feature_set(model):
+    feature_set=model.get('feature_set',LEGACY_TRADE_SET)
+    if (model.get('schema'),feature_set) not in ((1,LEGACY_TRADE_SET),(2,MA_TRADE_SET)):
+        raise ValueError('Unsupported trade feature schema')
+    return feature_set
+
+
+def trade_features(decision,bars,costs,instrument,*,feature_set=LEGACY_TRADE_SET):
     """Only the signal's closed candles, prices, and known execution assumptions."""
+    trade_feature_names(feature_set)
+    if feature_set==MA_TRADE_SET:
+        context=bars[-205:]
+        if (not context or any(b.symbol!=decision.symbol or b.seconds!=context[-1].seconds
+            or b.source!=context[-1].source or b.ts+timedelta(seconds=b.seconds)>decision.ts for b in context)
+            or any(b.ts<=a.ts for a,b in zip(context,context[1:]))):
+            raise ValueError('MA context requires compatible closed chronological candles at the signal')
     x=features(bars[-200:],'regime_flow_v2');a=decision.indicators['atr']
     stop=abs(decision.price-decision.stop)
     round_cost=(costs.fee(decision.price,instrument.point_value)+costs.fee(decision.target,instrument.point_value)
         +2*(costs.spread_ticks/2+costs.slippage_ticks)*instrument.tick*instrument.point_value)
     x += [decision.rr,stop/max(a,1e-12),round_cost/max(stop*instrument.point_value,1e-12),
         1. if decision.side=='BUY' else -1.]
+    if feature_set==MA_TRADE_SET:
+        closes=[b.close for b in context];price=closes[-1];side=1. if decision.side=='BUY' else -1.
+        def distance(period):
+            return side*(price-mean(closes[-period:]))/max(a,1e-12) if len(closes)>=period else 0.
+        def slope(period):
+            return side*(mean(closes[-period:])-mean(closes[-period-5:-5]))/max(a,1e-12) if len(closes)>=period+5 else 0.
+        recent=closes[-201:];changes=[y-z for z,y in zip(recent,recent[1:])]
+        gain=mean(max(0.,v) for v in changes[:2]);loss=mean(max(0.,-v) for v in changes[:2])
+        for value in changes[2:]:gain=(gain+max(0.,value))/2;loss=(loss+max(0.,-value))/2
+        rsi=100-100/(1+gain/loss) if loss else 100. if gain else 50.
+        d50=distance(50);s200=slope(200)
+        x += [d50,distance(200),slope(50),s200,rsi/100,a/max(price,1e-12),
+            float(len(context)>=205),s200*d50]
     return [max(-50.,min(50.,float(value))) for value in x]
 
 
@@ -60,7 +98,7 @@ def fit_net_head(clean,transformed,risk_budget,*,initial_risk=False):
             or not 0<denominator<=risk_budget+1e-7):raise ValueError('Invalid or missing initial stop cash')
         targets.append(net/denominator)
     if not all(math.isfinite(y) for y in targets):raise ValueError('Invalid net-score target scaling')
-    center=mean(targets);scale=max(1e-6,pstdev(targets));width=len(TRADE_FEATURES)
+    center=mean(targets);scale=max(1e-6,pstdev(targets));width=len(transformed[0][0])-1
     weights=[0.]*(width+1)
     # Untrimmed net outcomes; train-only target scaling controls numeric units.
     # Negative tails remain in the target and in every financial evaluation.
@@ -79,8 +117,9 @@ def fit_net_head(clean,transformed,risk_budget,*,initial_risk=False):
 
 
 def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,instrument,dataset_sha256,
-    with_net_head=False,risk_budget=None):
+    with_net_head=False,risk_budget=None,feature_set=LEGACY_TRADE_SET):
     if type(with_net_head) is not bool:raise ValueError('Net-head training must be explicit')
+    names=trade_feature_names(feature_set)
     cutoff=aware(cutoff);seen=set();clean=[]
     for sample in samples:
         signal=aware(datetime.fromisoformat(sample['signal_at']))
@@ -89,7 +128,7 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
         if signal in seen:raise ValueError('Repeated entry cannot inflate training samples')
         seen.add(signal)
         x=sample['features'];y=sample['label']
-        if len(x)!=len(TRADE_FEATURES) or any(type(v) not in (int,float) or not math.isfinite(v) for v in x):
+        if len(x)!=len(names) or any(type(v) not in (int,float) or not math.isfinite(v) for v in x):
             raise ValueError('Invalid trade feature vector')
         if type(y) is not int or y not in (0,1):raise ValueError('Trade labels must be realized net outcomes')
         clean.append(sample)
@@ -98,7 +137,7 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
     health=training_sample_health(clean);wins=health['positive']
     if not health['eligible']:
         raise InsufficientTradeData('At least 100 closed natural trades and 20 of each net outcome required')
-    width=len(TRADE_FEATURES)
+    width=len(names)
     means=[mean(s['features'][j] for s in clean) for j in range(width)]
     stds=[max(1e-6,pstdev(s['features'][j] for s in clean)) for j in range(width)]
     transformed=[([max(-8.,min(8.,(v-m)/sd)) for v,m,sd in zip(s['features'],means,stds)]+[1.],s['label']) for s in clean]
@@ -110,7 +149,8 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
             error=sigmoid(sum(w*v for w,v in zip(weights,x)))-y
             for j in range(width+1):gradients[j]+=error*x[j]
         for j in range(width+1):weights[j]-=.05*(gradients[j]/len(clean)+(.05*weights[j] if j<width else 0.))
-    model={'schema':1,'algorithm':LOGISTIC_NET if with_net_head else LOGISTIC,'features':list(TRADE_FEATURES),
+    model={'schema':1 if feature_set==LEGACY_TRADE_SET else 2,
+        'algorithm':LOGISTIC_NET if with_net_head else LOGISTIC,'features':list(names),
         'parameters':base_parameters(parameters),'symbol':symbol,'seconds':seconds,'source':source,
         'training_cutoff':cutoff.isoformat(),'training_samples':len(clean),'training_wins':wins,
         'training_samples_sha256':digest(clean),'dataset_sha256':dataset_sha256,
@@ -119,6 +159,7 @@ def fit_trade_model(samples,*,parameters,symbol,seconds,source,cutoff,costs,inst
         'target':'positive realized net P&L after modeled costs; natural STOP/TARGET exits only',
         'censoring':'forced end-of-window exits excluded from fitting regardless of sign, included in all financial evaluations',
         'execution_enabled':False}
+    if feature_set!=LEGACY_TRADE_SET:model['feature_set']=feature_set
     if with_net_head:model['net_head']=fit_net_head(clean,transformed,risk_budget)
     model['sha256']=digest(model)
     return model
@@ -152,11 +193,12 @@ def validate_trade_model(model,parameters=None):
     if not isinstance(model,dict):raise ValueError('Trade filter must be a checked JSON model')
     value=dict(model);claimed=value.pop('sha256',None)
     if digest(value)!=claimed:raise ValueError('Trade model checksum mismatch')
-    if (model.get('schema')!=1 or model.get('algorithm') not in (LOGISTIC,LOGISTIC_NET,LOGISTIC_INITIAL_RISK)
-        or model.get('features')!=list(TRADE_FEATURES) or model.get('probability_calibrated') is not False
+    names=trade_feature_names(model_feature_set(model))
+    if (model.get('algorithm') not in (LOGISTIC,LOGISTIC_NET,LOGISTIC_INITIAL_RISK)
+        or model.get('features')!=list(names) or model.get('probability_calibrated') is not False
         or model.get('execution_enabled') is not False or model.get('normalization_floor')!=1e-6):
         raise ValueError('Unsupported trade-outcome model')
-    width=len(TRADE_FEATURES)
+    width=len(names)
     arrays=(model.get('means',[]),model.get('stds',[]),model.get('weights',[]))
     if ([len(x) for x in arrays]!=[width,width,width+1]
         or any(type(v) not in (int,float) or not math.isfinite(v) for x in arrays for v in x)
@@ -185,12 +227,14 @@ def validate_trade_model(model,parameters=None):
 
 def score_trade(model,decision,bars):
     validate_trade_model(model)
-    if not bars or any(b.symbol!=model['symbol'] or b.seconds!=model['seconds'] or b.source!=model['source'] for b in bars[-200:]):
+    feature_set=model_feature_set(model);context=205 if feature_set==MA_TRADE_SET else 200
+    if not bars or any(b.symbol!=model['symbol'] or b.seconds!=model['seconds'] or b.source!=model['source'] for b in bars[-context:]):
         raise ValueError('Trade model requires compatible market history')
     if decision.ts<=aware(datetime.fromisoformat(model['training_cutoff'])):
         raise ValueError('Trade model cannot read its own training period')
     from .models import ExecutionSettings,Instrument
-    x=trade_features(decision,bars,ExecutionSettings(**model['costs']),Instrument(**model['instrument']))
+    args=(decision,bars,ExecutionSettings(**model['costs']),Instrument(**model['instrument']))
+    x=trade_features(*args) if feature_set==LEGACY_TRADE_SET else trade_features(*args,feature_set=feature_set)
     z=[(v-m)/sd for v,m,sd in zip(x,model['means'],model['stds'])]
     drift=max(abs(v) for v in z)
     bounded=[max(-8.,min(8.,v)) for v in z]+[1.]
@@ -204,12 +248,15 @@ def score_trade(model,decision,bars):
     return result
 
 
-def collect_trade_samples(bars,strategy,limits,costs,instruments):
+def collect_trade_samples(bars,strategy,limits,costs,instruments,*,feature_set=LEGACY_TRADE_SET):
     """Teacher runs the actual PAPER engine; feature capture precedes every fill."""
     if strategy.trade_filter is not None:raise ValueError('Teacher must use only the underlying technical strategy')
     from .backtest import run_backtest
-    result=run_backtest(bars,strategy,limits,costs,instruments=instruments,collect_trade_features=True)
+    result=run_backtest(bars,strategy,limits,costs,instruments=instruments,collect_trade_features=True,
+        trade_feature_set=feature_set)
     samples=result['trade_training_samples']
-    return samples,{'closed_trades':result['metrics']['trades'],'natural_labels':len(samples),
+    diagnostics={'closed_trades':result['metrics']['trades'],'natural_labels':len(samples),
         'censored_forced_exits':sum(t['exit_reason']=='FLATTEN' for t in result['trades']),
         'teacher_metrics':result['metrics'],'teacher_parameters':asdict(strategy)}
+    if feature_set!=LEGACY_TRADE_SET:diagnostics['feature_set']=feature_set
+    return samples,diagnostics
