@@ -13,6 +13,7 @@ from datetime import datetime,timedelta
 from pathlib import Path
 
 from scripts.train_and_blind_test import assumptions,get_data
+from trading_assistant.v2.archived_replay import archived_replay,comparison_contract
 from trading_assistant.v2.blind_testing import blind_replay
 from trading_assistant.v2.learning import HistoricalRotation,LearningMemory,digest
 from trading_assistant.v2.models import UTC,Instrument
@@ -27,6 +28,10 @@ METHODS=('trend','breakout','pullback','adaptive','sma_cross','ema_pullback','me
 GROUPS=('BTCUSDT:300','ETHUSDT:300','BNBUSDT:300','SOLUSDT:300',
     'BTCUSDT:3600','ETHUSDT:3600','BNBUSDT:3600','SOLUSDT:3600',
     'BTCUSDT:86400','ETHUSDT:86400','BNBUSDT:86400','SOLUSDT:86400')
+
+
+def window_sizes(symbol,seconds):
+    return (30,28) if seconds==300 else (365,90) if seconds==3600 else (365 if symbol in ('BTCUSDT','ETHUSDT') else 1460,90)
 
 
 def research_assumptions(symbol):
@@ -135,8 +140,7 @@ def write_report(output,summary):
 
 def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     symbol,seconds_text=group.split(':');seconds=int(seconds_text)
-    train_days=30 if seconds==300 else 365 if seconds==3600 else 365 if symbol in ('BTCUSDT','ETHUSDT') else 1460
-    test_days=7 if seconds==300 else 21 if seconds==3600 else 90
+    train_days,test_days=window_sizes(symbol,seconds)
     try:
         window=plan_forward(rotation,symbol,seconds,as_of=datetime.now(UTC),test_days=test_days,
             training_days=train_days,after=state['groups'].get(group,{}).get('last_external_end'))
@@ -145,18 +149,19 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     settings={'limits':asdict(limits),'costs':asdict(costs),'instruments':{k:asdict(v) for k,v in specs.items()}}
     previous=state['groups'].get(group,{})
     parameters=asdict(Strategy(**store.version(previous['champion'])['parameters'])) if previous.get('champion') else asdict(Strategy())
-    reference_id=store.register(group,parameters,code_id,settings)
-    if previous.get('champion') and store.version(previous['champion'])['code_id']!=code_id:
-        # Old source remains archived; do not count new-code results as old-version confirmations.
-        rebased_from=previous['champion']
-    else:rebased_from=None
+    reference_id=previous.get('champion') or store.register(group,parameters,code_id,settings)
+    original_reference=store.version(reference_id)
+    contract=comparison_contract(original_reference,settings)
     if not previous.get('champion'):
         store.set_champion(state,group,reference_id,'INITIAL_REFERENCE');store.save(state)
     count=previous.get('cycles',0)
     development_after=(parameters.get('trade_filter') or {}).get('training_cutoff')
     bank=candidate_bank(count,parameters,args.candidates)
     plan={'cycle_id':cycle_id,'group':group,'windows':window,'code_id':code_id,
-        'reference_id':reference_id,'rebased_from':rebased_from,'candidate_parameters':bank,
+        'reference_id':reference_id,'reference_code_id':original_reference['code_id'],
+        'reference_execution':'original archived source and original assumptions',
+        'development_reference':'current-code port used only as a development seed',
+        'comparison_contract':contract,'candidate_parameters':bank,
         'assumptions':settings,'selection':'three chronological development folds; >=30 total trades, >=5 trades and positive aggregate net in each fold; Wilson lower bound first',
         'goal':'same version; >=3 distinct real windows; >=100 trades total; >90% each; positive net and double-cost stress',
         'promotion':'preselected challenger only; >=10 external trades; better net and nonworse accuracy than reference; positive double-cost net; drawdown <=10%',
@@ -210,9 +215,11 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     warmup=[b for b in full if b.ts<start][-250:];testing=[b for b in full if b.ts>=start]
     if len(warmup)<250:raise ValueError('Contexto anterior insuficiente; a avaliação não começa consumindo candles do teste como aquecimento')
     c=external_run(testing,warmup,selected_parameters,group,group_dir,'candidate')
-    r=c if candidate_id==reference_id else external_run(testing,warmup,parameters,group,group_dir,'reference')
     s=external_run(testing,warmup,selected_parameters,group,group_dir,'double-costs',stress=True)
-    rs=s if candidate_id==reference_id else external_run(testing,warmup,parameters,group,group_dir,'reference-double-costs',stress=True)
+    if candidate_id==reference_id:r,rs=c,s;control_provenance={'same_version_as_candidate':True}
+    else:
+        control=archived_replay(store,reference_id,testing,warmup,group_dir/'original-reference')
+        r,rs=control['normal'],control['stress'];control_provenance=control['provenance']
     promotion=promotion_decision(winner,c,r,s)
     if candidate_id==reference_id:promotion={'promoted':False,'reasons':['reference_already_selected']}
     confirmations=[]
@@ -226,6 +233,7 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     active_version=candidate_id if promotion['promoted'] else reference_id
     evidence=goal_evidence([row for row in state['evaluations']+confirmations if row['version_id']==active_version])
     row={'group':group,'status':'COMPLETED','reference_id':reference_id,'candidate_id':candidate_id,
+        'reference_provenance':control_provenance,'comparison_contract':contract,
         'selection':selection,'development':winner,'external':c,'reference_external':r,'double_costs':s,
         'reference_double_costs':rs,'promotion':promotion,'goal':evidence,'development_candidates':len(results),
         'decision':'PROMOVIDA NA PESQUISA' if promotion['promoted'] else 'REFERÊNCIA PRESERVADA'}
@@ -233,7 +241,6 @@ def run_group(group,args,store,state,code_id,rotation,memory,output,cycle_id):
     row['runtime_archive']=store.archive_run(group_dir)
     # Commit the research reference only after its complete data/report bundle was preserved.
     if promotion['promoted']:store.set_champion(state,group,candidate_id,'VALIDATION_AND_EXTERNAL_GATE_PASSED')
-    elif rebased_from:store.set_champion(state,group,reference_id,'REFERENCE_PARAMETERS_REEVALUATED_ON_NEW_CODE')
     state['evaluations'].extend(confirmations)
     state['groups'][group]['cycles']=count+1
     state['groups'][group]['last_evidence']=evidence
@@ -258,9 +265,10 @@ def main():
     if args.plan_only:
         for group in args.groups:
             symbol,seconds=group.split(':');seconds=int(seconds)
+            train_days,test_days=window_sizes(symbol,seconds)
             try:
-                window=plan_forward(rotation,symbol,seconds,as_of=datetime.now(UTC),test_days=7 if seconds==300 else 21 if seconds==3600 else 90,
-                    training_days=30 if seconds==300 else 365 if seconds==3600 else 365 if symbol in ('BTCUSDT','ETHUSDT') else 1460,
+                window=plan_forward(rotation,symbol,seconds,as_of=datetime.now(UTC),test_days=test_days,
+                    training_days=train_days,
                     after=store.state()['groups'].get(group,{}).get('last_external_end'))
                 print(json.dumps({'group':group,'windows':window}),flush=True)
             except ValueError as error:print(json.dumps({'group':group,'waiting':str(error)}),flush=True)
@@ -277,6 +285,13 @@ def main():
         raise SystemExit(completed.returncode)
     with store.lock():
         code_id=store.archive_source(sources);state=store.state()
+        for group in list(state['groups']):
+            anchor=store.validated_reference(state,group)
+            if anchor!=state['groups'][group]['champion']:
+                store.set_champion(state,group,anchor,'RESTORED_ORIGINAL_ARCHIVED_REFERENCE')
+                state['groups'][group]['last_evidence']=goal_evidence(
+                    [row for row in state['evaluations'] if row['version_id']==anchor])
+        store.save(state)
         for _ in range(args.cycles):
             cycle_id=datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')
             output=Path(args.output)/cycle_id;output.mkdir(parents=True)

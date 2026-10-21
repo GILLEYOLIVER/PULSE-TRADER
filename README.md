@@ -25,6 +25,8 @@ os resultados cegos ficam fora dessa seleção.
 A nova rotina está descrita em [Ciclo de pesquisa](docs/CONTINUOUS_RESEARCH.md).
 Ela preserva código e configurações, compara cada ativo/prazo separadamente, avança
 cronologicamente pelos históricos e mantém a referência quando a candidata não passa.
+As comparações externas executam a referência com seu código e regras originais em
+processo isolado; uma atualização de código não substitui a melhor versão por si só.
 Há filtros de entrada por médias, direção, volume e afastamento, um candidato de retorno
 à média e testes com custos dobrados. A meta de mais de 90% ainda depende de confirmação;
 nenhuma porcentagem é garantida. A execução continua exclusivamente PAPER.

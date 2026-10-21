@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Execute preserved references in isolated interpreters with their original algorithms, parameters and assumptions; restore unvalidated source rebases without deleting history and verify equal capital/risk/cost/instrument units.
+- Preregister larger future external windows (28 days for five-minute candles, 90 days for hourly candles) while retaining all existing sample and financial gates.
+
 - Added an experimental L2 trade-outcome entry filter trained on realized net outcomes captured before fills, with temporal fold refits, sample/class requirements, checksum/time/parameter guards and no calibrated probability claims.
 - Corrected hourly warmup to require 250 prior candles and flagged six earlier short-context runs as ineligible for goal confirmation while preserving their financial results.
 - Added common forward-only validation folds for frozen learned references, reference cost stress/evidence, and batched hash-chain persistence.

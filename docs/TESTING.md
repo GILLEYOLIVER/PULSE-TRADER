@@ -9,7 +9,10 @@ python -m scripts.smoke_gui
 python -m trading_assistant.v2.cli diagnose
 ```
 
-131 tests passed without skips. Trade-outcome coverage includes realized-label availability,
+135 tests passed without skips. Archived-reference coverage verifies execution of different preserved
+source implementations, exact financial/decision equivalence, source corruption rejection, reference
+restoration after unvalidated rebases, and rejection of changed capital/risk/cost/unit assumptions.
+Trade-outcome coverage includes realized-label availability,
 teacher feature capture without execution changes, deterministic fitting, source/time/parameter compatibility,
 model integrity, history-only context, common validation folds and all-or-nothing invalid batch rejection.
 Research-cycle coverage includes weighted operation accuracy,
