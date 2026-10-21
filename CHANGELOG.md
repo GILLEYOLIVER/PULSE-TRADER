@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.2.0 - 2026-10-20
+
+- Added disposable research state and shared core indicators; final benchmark kept legacy results identical and ran about 24x faster than the durable reference on this machine.
+- Added proportional fees, net reward/risk gate, scaled quantity/volume, spot short restriction and account/provider currency checks; corrected cost-aware break-even placement.
+- Added closed-candle quote volume, trade count and taker volume, public Binance downloads, a regime/flow candidate and SMA/EMA entry/stop methods.
+- Added 14-feature optional statistical models with train/serve consistency and backwards-compatible loading.
+- Added local training memory, archived datasets/models, blind results isolated from training priors, and disjoint historical-window rotation.
+- Ran 234 goal/stop/risk combinations and 81 external/adverse simulations with 143,332 observed decisions; complex candidates did not demonstrate consistent advantage and were not automatically adopted.
+- Expanded automated coverage to 101 tests and added UI training/memory verification to portable self-test.
+
 ## 2.1.0 - 2026-10-20
 
 - Added read-only brapi/Mercado Bitcoin data, scheduled refresh and explicit locale/timeframe Profit CSV conversion.

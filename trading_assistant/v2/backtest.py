@@ -6,7 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from .data import export_csv
 from .execution import PaperEngine
-from .ledger import Ledger
+from .ledger import Ledger,SimulationLedger
 from .models import Limits,ExecutionSettings
 from .strategy import Strategy
 
@@ -23,7 +23,7 @@ def metrics(trades,capital,equity=None):
         "net":sum(results),"fees":sum(t["fees"] for t in trades),"max_drawdown":dd,
         "return_fraction":sum(results)/capital,"profit_factor_note":"undefined without losing trades" if not losses else ""}
 
-def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None):
+def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instruments=None,*,durable=False):
     if not bars: raise ValueError("No data")
     previous={};sources={};timeframes={}
     for b in bars:
@@ -39,7 +39,10 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
         groups[-1].append(b)
     if len(symbols)>1 and any({b.symbol for b in group}!=symbols or len({b.seconds for b in group})!=1 for group in groups):
         raise ValueError("Portfolio history requires every symbol at each synchronized interval")
-    ledger=Ledger();engine=PaperEngine(ledger,limits,costs,instruments=instruments,strategy=strategy,calendar=calendar)
+    ledger=Ledger() if durable else SimulationLedger()
+    engine=PaperEngine(ledger,limits,costs,instruments=instruments,strategy=strategy,calendar=calendar)
+    if any(engine.specs[symbol].currency!=engine.limits.currency for symbol in symbols):
+        ledger.close();raise ValueError('Backtest requires instrument and account in the same currency')
     equity=[]
     digest=hashlib.sha256()
     for group in groups:
@@ -60,7 +63,7 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
     for symbol in sorted(symbols):
         same=[b for b in bars if b.symbol==symbol]
         spec=engine.specs[symbol]
-        legs[symbol]=(same[-1].close-same[0].open)*spec.point_value*spec.lot-2*spec.lot*engine.costs.fee_per_unit
+        legs[symbol]=(same[-1].close-same[0].open)*spec.point_value*spec.lot-engine.costs.fee(same[0].open,spec.point_value,spec.lot)-engine.costs.fee(same[-1].close,spec.point_value,spec.lot)
     result={"version":2,"mode":"BACKTEST_PAPER","data_sha256":digest.hexdigest(),"sources":sources,
         "bars":len(bars),"start":first.ts.isoformat(),"end":end.isoformat(),"strategy":engine.strategy.name,
         "parameters":{"reward_r":engine.strategy.reward_r,"stop_atr":engine.strategy.stop_atr,"multi_timeframe":engine.strategy.multi_timeframe},
@@ -72,6 +75,7 @@ def run_backtest(bars,strategy=None,limits=None,costs=None,calendar=None,instrum
         "orders":list(state["orders"].values()),"trades":state["trades"],"equity":equity,
         "limitations":["Synthetic results are not market evidence","OHLC cannot determine intrabar path; stop first",
             "Fees and margins are simulation inputs","No queue priority, auction, exchange halts, tax or official rollover modelling"]}
+    json.dumps(result,allow_nan=False)  # disposable research state must never emit invalid numbers
     ledger.close()
     return result
 

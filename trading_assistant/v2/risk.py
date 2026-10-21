@@ -22,9 +22,10 @@ class RiskManager:
         for p in s["positions"].values():
             direction=1 if p["side"]=="BUY" else -1
             mark=s["marks"].get(p["symbol"],p["entry"])
-            unrealized+=(mark-p["entry"])*direction*p["qty"]*p["point_value"]-p["entry_fee"]-p["qty"]*self.costs.fee_per_unit
+            unrealized+=(mark-p["entry"])*direction*p["qty"]*p["point_value"]-p["entry_fee"]-self.costs.fee(mark,p["point_value"],p["qty"])
             distance=max(0,(mark-p["stop"])*direction)
             worst+=distance*p["qty"]*p["point_value"]+p["qty"]*(self.costs.slippage_ticks+self.costs.spread_ticks/2)*p["tick"]*p["point_value"]
+            worst+=max(0,self.costs.fee(p['stop'],p['point_value'],p['qty'])-self.costs.fee(mark,p['point_value'],p['qty']))
         return pnl,unrealized,worst
 
     def block_reason(self,s,now):
@@ -57,9 +58,14 @@ class RiskManager:
         reason=self.block_reason(s,now)
         if reason: return 0,reason
         if d.symbol!=spec.symbol or d.symbol not in l.allowed_symbols or d.strategy not in l.allowed_strategies: return 0,"Asset or strategy not authorized"
+        if spec.currency!=l.currency:return 0,'Instrument currency differs from account; explicit conversion required'
+        source=s['last_sources'].get(d.symbol,'')
+        expected='USDT' if d.symbol in ('BTCUSDT','ETHUSDT') or source=='BINANCE_SPOT_USDT' else 'BRL' if source in ('BRAPI_RAW','MERCADO_BITCOIN_BRL') else None
+        if expected is not None and spec.currency!=expected:return 0,'Provider price currency differs from instrument specification'
         if self.calendar is not None and not self.calendar.is_open(now,d.symbol):
             return 0,"Outside user-verified session or calendar unavailable"
         if d.side not in ("BUY","SELL") or not finite(d.price,d.stop,d.target) or min(d.price,d.stop,d.target)<=0: return 0,"Invalid decision"
+        if d.side=="SELL" and not spec.allow_short:return 0,"Short selling disabled for instrument"
         if not aware(d.ts)<=now<=aware(d.expires): return 0,"Expired or future signal"
         last=s["last_bars"].get(d.symbol)
         if not last or not 0<=(now-datetime.fromisoformat(last)).total_seconds()<=l.max_data_age_seconds: return 0,"Stale or missing market data"
@@ -76,9 +82,13 @@ class RiskManager:
         day=local_time(now).date()
         today=sum(local_time(datetime.fromisoformat(o.get("filled_at",o["created_at"]))).date()==day for o in s["orders"].values() if o["status"] in ("FILLED","PARTIAL","CLOSED"))
         if today+len(pending)>=l.max_trades: return 0,"Daily trade count"
-        cash_risk=abs(entry-d.stop)*spec.point_value+2*c.fee_per_unit+(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value
+        cash_risk=abs(entry-d.stop)*spec.point_value+c.fee(entry,spec.point_value)+c.fee(d.stop,spec.point_value)+(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value
         # At submission reserve entry slippage too; at execution entry already contains it.
         if entry==d.price: cash_risk+=(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value
+        if l.min_net_reward_r:
+            net_reward=abs(d.target-entry)*spec.point_value-c.fee(entry,spec.point_value)-c.fee(d.target,spec.point_value)
+            net_reward-=(c.spread_ticks/2+c.slippage_ticks)*spec.tick*spec.point_value*(2 if entry==d.price else 1)
+            if net_reward/cash_risk<l.min_net_reward_r:return 0,"Net reward/risk below configured minimum after costs"
         pnl,unrealized,worst=self.period_pnl(s,now)
         reserved=sum(o["reserved_risk"] for o in pending)
         budget=min(l.capital*l.risk_fraction,l.daily_loss+pnl["day"]+unrealized-worst-reserved,

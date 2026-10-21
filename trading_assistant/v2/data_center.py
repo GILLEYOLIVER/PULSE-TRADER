@@ -23,7 +23,7 @@ class DataCenter:
         if self.settings_path.exists():
             try:
                 saved=json.loads(self.settings_path.read_text(encoding='utf-8'))
-                if not isinstance(saved,dict) or saved.get('provider') not in ('brapi','mercado_bitcoin') or saved.get('period') not in PERIODS:
+                if not isinstance(saved,dict) or saved.get('provider') not in ('brapi','mercado_bitcoin','binance') or saved.get('period') not in PERIODS:
                     raise ValueError('Configuração da fonte inválida')
                 self.settings.update(saved)
             except (ValueError,OSError):
@@ -42,10 +42,10 @@ class DataCenter:
         context=tk.BooleanVar(value=self.settings['context'])
         ttk.Label(window,padding=16,wraplength=680,text=(
             'Dados públicos de ações: PETR4, VALE3, ITUB4 e MGLU3 na brapi. Outros ativos dependem do plano e da variável BRAPI_TOKEN. '
-            'Cripto: BTC e ETH spot em BRL no Mercado Bitcoin. Cotações podem ter atraso; confira a data retornada. '
+            'Cripto: BTC/ETH em BRL no Mercado Bitcoin; BTCUSDT/ETHUSDT em USDT na Binance, com atividade do candle. Cotações podem ter atraso. '
             'WIN/WDO: use um histórico autorizado do Profit. Nenhum acesso a conta ou envio de ordens.')).pack(fill='x')
         form=ttk.Frame(window,padding=16);form.pack(fill='x')
-        for row,(label,var,choices) in enumerate((('Provedor',provider,('brapi','mercado_bitcoin')),
+        for row,(label,var,choices) in enumerate((('Provedor',provider,('brapi','mercado_bitcoin','binance')),
                     ('Ativo',symbol,None),('Período',period,tuple(PERIODS)))):
             ttk.Label(form,text=label).grid(row=row,column=0,sticky='w',pady=6)
             widget=ttk.Combobox(form,textvariable=var,values=choices,state='readonly') if choices else ttk.Entry(form,textvariable=var)

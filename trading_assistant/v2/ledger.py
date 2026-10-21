@@ -39,3 +39,37 @@ class Ledger:
         self.db.execute("INSERT INTO audit(ts,event,payload) VALUES(?,?,?)",(str(ts),event,json.dumps(payload,allow_nan=False)))
 
     def close(self): self.db.close()
+
+
+class SimulationLedger:
+    """Disposable backtest state. Any failure invalidates the entire run.
+
+    Never used by the desktop PAPER session. No database roundtrip or copies per
+    candle: the runner exclusively owns this state. Failed runs cannot be read,
+    resumed or committed, so partially applied decisions never become a report.
+    """
+    def __init__(self):
+        seed=Ledger()
+        try:self._state=seed.read()
+        finally:seed.close()
+        self._valid=True;self._active=False
+
+    def read(self):
+        if not self._valid:raise ValueError('Failed simulation must be discarded')
+        return self._state
+
+    @contextmanager
+    def transaction(self):
+        self.read()
+        if self._active:raise ValueError('Nested simulation transaction')
+        self._active=True
+        try:yield self._state
+        except BaseException:
+            self._valid=False
+            raise
+        finally:self._active=False
+
+    def audit(self,ts,event,payload):
+        self.read()  # Backtest orders/trades preserve outcomes; no durable audit writes.
+
+    def close(self):self._valid=False

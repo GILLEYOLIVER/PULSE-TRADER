@@ -79,6 +79,10 @@ def fetch_market(symbol, seconds=86400, *, provider='brapi', window='2y', now=No
     if not re.fullmatch(r'[A-Z0-9]{2,16}', symbol):
         raise ValueError('Código de ativo inválido')
     now = aware(now or datetime.now(UTC))
+    if provider=='binance':
+        days={'5d':5,'1mo':30,'3mo':90,'1y':365,'2y':730,'5y':1825}
+        if window not in days:raise ValueError('Binance: use um intervalo de 5d a 5y')
+        return fetch_binance(symbol,seconds,start=now-timedelta(days=days[window]),end=now,getter=getter)
     if provider == 'brapi':
         intervals = {60: '1m', 300: '5m', 900: '15m', 1800: '30m', 3600: '60m', 86400: '1d'}
         if seconds not in intervals or window not in ('5d', '1mo', '3mo', '1y', '2y', '5y', 'max'):
@@ -120,6 +124,41 @@ def fetch_market(symbol, seconds=86400, *, provider='brapi', window='2y', now=No
                                 'last_closed_at': (bars[-1].ts + timedelta(seconds=seconds)).isoformat(),
                                 'candles': len(bars), 'sha256': digest, 'response_sha256':response_digest, 'price_basis': basis, 'documentation': documentation,
                                 'mode': 'READ_ONLY', 'live_quotes': False})
+
+
+def fetch_binance(symbol,seconds,*,start,end,getter=json_response):
+    """Public spot-only OHLC + closed-candle activity; no account/order URLs."""
+    intervals={60:'1m',300:'5m',900:'15m',1800:'30m',3600:'1h',86400:'1d'}
+    if symbol not in ('BTCUSDT','ETHUSDT') or seconds not in intervals:
+        raise ValueError('Binance: BTCUSDT/ETHUSDT, 1m/5m/15m/30m/1h/diário; valores em USDT')
+    start,end=aware(start),aware(end)
+    step=seconds*1000
+    cursor=((int(start.timestamp()*1000)+step-1)//step)*step
+    until=int(end.timestamp()*1000)//step*step
+    if not cursor<until or (until-cursor)//step>10000:
+        raise ValueError('Escolha um intervalo com 1 a 10.000 candles completos por consulta')
+    bars=[];pages=[]
+    while cursor<until:
+        query=urllib.parse.urlencode(dict(symbol=symbol,interval=intervals[seconds],startTime=cursor,endTime=until-1,limit=1000))
+        payload=getter('https://data-api.binance.vision/api/v3/klines?'+query)
+        if not isinstance(payload,list) or not payload:raise DataUnavailable('Histórico Binance incompleto no intervalo solicitado')
+        pages.append(hashlib.sha256(json.dumps(payload,separators=(',',':')).encode()).hexdigest())
+        previous=cursor-step
+        for row in payload:
+            if (not isinstance(row,list) or len(row)<11 or type(row[0]) is not int or type(row[6]) is not int
+                or row[0]!=previous+step or row[6]!=row[0]+step-1 or row[0]>=until or type(row[8]) is not int):
+                raise DataUnavailable('Candle Binance ausente, fora de ordem ou com horário incompatível')
+            bars.append(Bar(symbol,datetime.fromtimestamp(row[0]/1000,UTC),
+                *(float(row[index]) for index in (1,2,3,4,5)),'BINANCE_SPOT_USDT',seconds,
+                float(row[7]),int(row[8]),float(row[9])))
+            previous=row[0]
+        cursor=previous+step
+    return MarketSnapshot(bars,{'provider':'binance','symbol':symbol,'currency':'USDT','seconds':seconds,
+        'retrieved_at':datetime.now(UTC).isoformat(),'last_closed_at':(bars[-1].ts+timedelta(seconds=seconds)).isoformat(),
+        'candles':len(bars),'sha256':history_digest(bars),'page_sha256':pages,
+        'price_basis':'Spot USDT; volume base, volume financeiro, negócios e compras agressoras reais do candle encerrado',
+        'documentation':'https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md',
+        'mode':'READ_ONLY','live_quotes':False})
 
 
 def normalized_header(value):

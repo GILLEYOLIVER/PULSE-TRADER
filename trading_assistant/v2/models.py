@@ -29,6 +29,9 @@ class Bar:
     volume: float
     source: str = "SYNTHETIC"
     seconds: int = 60
+    quote_volume: float | None = None
+    trades: int | None = None
+    taker_buy_volume: float | None = None
 
     def __post_init__(self):
         aware(self.ts)
@@ -36,6 +39,14 @@ class Bar:
             or self.low <= 0 or self.volume < 0 or self.low > min(self.open,self.close)
             or self.high < max(self.open,self.close) or type(self.seconds) is not int or self.seconds <= 0):
             raise ValueError("Invalid OHLCV candle")
+        if (self.quote_volume is not None and (not finite(self.quote_volume) or self.quote_volume<0)
+            or self.trades is not None and (type(self.trades) is not int or self.trades<0)
+            or self.taker_buy_volume is not None and (not finite(self.taker_buy_volume)
+                or not 0<=self.taker_buy_volume<=self.volume+1e-9)):
+            raise ValueError('Invalid closed-candle market activity')
+
+    def activity(self):
+        return [self.quote_volume,self.trades,self.taker_buy_volume]
 
 @dataclass(frozen=True)
 class Instrument:
@@ -46,10 +57,13 @@ class Instrument:
     margin: float = 1000.0  # simulation assumption, NOT broker margin
     currency: str = "BRL"
     expiry: str | None = None
+    allow_short: bool = True
+    volume_per_unit: float = 1.0  # quantity of provider base volume per engine unit
 
     def __post_init__(self):
-        if (not finite(self.point_value,self.tick,self.margin) or min(self.point_value,self.tick,self.margin) <= 0
-            or type(self.lot) is not int or self.lot < 1):
+        if (not finite(self.point_value,self.tick,self.margin,self.volume_per_unit)
+            or min(self.point_value,self.tick,self.margin,self.volume_per_unit) <= 0
+            or type(self.allow_short) is not bool or type(self.lot) is not int or self.lot < 1):
             raise ValueError("Invalid instrument specification")
 
 # Financial multipliers; margins are deliberately configurable paper assumptions.
@@ -96,14 +110,17 @@ class Limits:
     start_hour: int = 0
     end_hour: int = 24
     allowed_symbols: tuple[str,...] = tuple(INSTRUMENTS)
-    allowed_strategies: tuple[str,...] = ("trend","breakout","pullback")
+    allowed_strategies: tuple[str,...] = ("trend","breakout","pullback","adaptive","sma_cross","ema_pullback")
     max_data_age_seconds: int = 180
+    min_net_reward_r: float = 0.0  # optional target after costs / stop loss including costs
+    currency: str = 'BRL'
 
     def __post_init__(self):
         if isinstance(self.allowed_symbols,list): object.__setattr__(self,"allowed_symbols",tuple(self.allowed_symbols))
         if isinstance(self.allowed_strategies,list): object.__setattr__(self,"allowed_strategies",tuple(self.allowed_strategies))
 
     def validate(self):
+        if self.currency not in ('BRL','USD','USDT'):raise ValueError('Account currency must be BRL, USD or USDT')
         if (not isinstance(self.allowed_symbols,tuple) or not self.allowed_symbols
             or not isinstance(self.allowed_strategies,tuple) or not self.allowed_strategies
             or any(not isinstance(value,str) or not value for value in self.allowed_symbols+self.allowed_strategies)):
@@ -113,7 +130,7 @@ class Limits:
         if any(type(value) is not int for value in counts):
             raise ValueError("Counts and hours must be whole numbers")
         positive = (self.capital,self.daily_loss,self.weekly_loss,self.monthly_loss,self.daily_target,self.max_exposure)
-        if not finite(*positive,self.risk_fraction,self.max_spread_ticks,self.max_slippage_ticks) or min(positive) <= 0:
+        if not finite(*positive,self.risk_fraction,self.max_spread_ticks,self.max_slippage_ticks,self.min_net_reward_r) or min(positive) <= 0 or self.min_net_reward_r<0:
             raise ValueError("Limits must be finite and positive")
         if not 0 < self.risk_fraction <= .02:
             raise ValueError("Risk per trade must be > 0 and <= 2%")
@@ -131,9 +148,13 @@ class ExecutionSettings:
     latency_bars: int = 1
     trailing_atr: float = 0.
     break_even_r: float = 0.
+    fee_bps: float = 0.  # additional proportional fee; 10 bps = 0.1%, each side
+
+    def fee(self,price,point_value,quantity=1):
+        return quantity*(self.fee_per_unit+abs(price*point_value)*self.fee_bps/10000.)
 
     def validate(self):
-        if (not finite(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.participation,self.trailing_atr,self.break_even_r)
+        if (not finite(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.participation,self.trailing_atr,self.break_even_r,self.fee_bps)
             or min(self.spread_ticks,self.slippage_ticks,self.fee_per_unit,self.trailing_atr,self.break_even_r) < 0
-            or not 0 < self.participation <= 1 or type(self.latency_bars) is not int or self.latency_bars < 1):
+            or not 0<=self.fee_bps<=10000 or not 0 < self.participation <= 1 or type(self.latency_bars) is not int or self.latency_bars < 1):
             raise ValueError("Invalid paper execution settings")
